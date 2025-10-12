@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>말씀읽기APP</title>
+  <title>말씀읽기APP v2.0</title>
 
-  <!-- PWA -->
+  <!-- PWA (선택) -->
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#10183a">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -116,7 +116,7 @@
           <small id="micDb" class="muted">-∞ dB</small>
         </div>
 
-        <!-- 👇 음성매칭 엄격도 표시/선택 (UI만 추가) -->
+        <!-- 매칭 엄격도 (보통/엄격/관대) -->
         <div id="strictControls" class="muted sm" style="margin:6px 0 0 0;">
           <span>매칭:</span>
           <label style="margin-left:6px;"><input type="radio" name="matchStrict" value="엄격"> 엄격</label>
@@ -124,7 +124,7 @@
           <label style="margin-left:6px;"><input type="radio" name="matchStrict" value="관대"> 관대</label>
         </div>
 
-        <!-- 버튼들: 고정형(오른쪽) ⟨ / 🎙️ / ⟩  -->
+        <!-- 고정 플로팅 버튼 -->
         <div class="fab-row" style="
           position:fixed; right:12px; top:50%; transform:translateY(-50%);
           display:flex; flex-direction:column; gap:12px; align-items:center; z-index:1000;">
@@ -133,7 +133,7 @@
           <button id="btnNextVerse" class="fab" aria-label="다음 절">⟩</button>
         </div>
 
-        <!-- ‘해당절읽음’ 버튼: 오른쪽 정렬 & 초록색 -->
+        <!-- 해당절읽음 -->
         <div style="margin-top:10px; display:flex; justify-content:flex-end;">
           <button id="btnMarkRead" style="background:#43d17a; color:#fff; padding:6px 12px; border-radius:6px;">
             해당절읽음
