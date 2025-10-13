@@ -569,6 +569,8 @@ setupHeardOut();
     const v = state.verses[state.currentVerseIdx] || "";
     state.paintedPrefix = 0;
     state.heardJ = "";
+    state.heardRaw = "";                  // ← 추가: 누적 원문 초기화
+    if (els.heardBox) els.heardBox.textContent = "";  // ← 추가: 화면 표시도 초기화
     state.heardText = "";                        // 🆕
     if (els.heardTextLine) els.heardTextLine.textContent = "";  // 🆕
     state.ignoreUntilTs = 0;
@@ -702,16 +704,17 @@ setupHeardOut();
 
   // ---------- SpeechRecognition (간단 루프: 버튼 토글용) ----------
   function supportsSR(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
-  function makeRecognizer(){
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return null;
-    const r = new SR();
-    r.lang = 'ko-KR';
-    r.continuous = !IS_ANDROID;
-    r.interimResults = !IS_ANDROID ? true : false;
-    try { r.maxAlternatives = 4; } catch(_) {}
-    return r;
-  }
+   function makeRecognizer(){
+     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+     if (!SR) return null;
+     const r = new SR();
+     r.lang = 'ko-KR';
+     r.continuous = true;        // 항상 연속 인식
+     r.interimResults = true;    // 중간결과도 받기
+     try { r.maxAlternatives = 4; } catch(_) {}
+     return r;
+   }
+
   let loopTimer=null, watchdogTimer=null, noResultTimer=null;
   const ANDROID_WATCHDOG_MS  = 8500;
   const ANDROID_NORESULT_MS  = 7000;
@@ -728,60 +731,61 @@ setupHeardOut();
      }
      state.recog = recog;
    
-     recog.onresult = (evt) => {
-       lastResultTs = Date.now();
-   
-       // 🔄 no-result 타임아웃 재설정
-       if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-       noResultTimer = setTimeout(() => {
-         if (!state.listening) return;
-         try { state.recog && state.recog.abort?.(); } catch (_) {}
-         runRecognizerLoop();
-       }, 7000);
-   
-       const res = evt.results[evt.results.length - 1];
-       if (!res) return;
-       const tr = (res[0]?.transcript || "").trim();
-       if (!tr) return;
-   
-       // ✅ 인식된 문장 표시
-       ensureHeardBox();
-       if (res.isFinal) {
-         state.heardRaw += (state.heardRaw ? " " : "") + tr;
-       }
-       const showText = state.heardRaw + (res.isFinal ? "" : (state.heardRaw ? " " : "") + tr);
-       if (els.heardBox) els.heardBox.textContent = showText;
-   
-       // ✅ 현재 절 텍스트와 비교
-       const v = state.verses[state.currentVerseIdx] || "";
-       if (!v) return;
-       if (Date.now() < state.ignoreUntilTs) return;
-   
-       const targetJ = state.targetJ || normalizeToJamo(v, false);
-       const pieceJ = normalizeToJamo(tr, true);
-   
-       if (res.isFinal) {
-         state.heardJ = (state.heardJ + pieceJ);
-         const cap = targetJ.length * 3;
-         if (state.heardJ.length > cap) state.heardJ = state.heardJ.slice(-cap);
-       }
-   
-       const tmpHeard = state.heardJ + (res.isFinal ? "" : pieceJ);
-   
-       // ✅ 간단한 길이 기반 칠하기
-       const k = Math.min(targetJ.length, tmpHeard.length);
-       schedulePaint(k);
-   
-       const fullyPainted = Math.max(state.paintedPrefix, state.pendingPaint) >= targetJ.length;
-       if (!state._advancing && fullyPainted) {
-         state._advancing = true;
-         setTimeout(() => {
-           completeVerse(true);
-           state._advancing = false;
-         }, 120);
-         return;
-       }
-     };
+recog.onresult = (evt) => {
+  lastResultTs = Date.now();
+
+  // 🔄 no-result 타임아웃 재설정
+  if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
+  noResultTimer = setTimeout(() => {
+    if (!state.listening) return;
+    try { state.recog && state.recog.abort?.(); } catch (_) {}
+    runRecognizerLoop();
+  }, 7000);
+
+  const res = evt.results[evt.results.length - 1];
+  if (!res) return;
+  const tr = (res[0]?.transcript || "").trim();
+  if (!tr) return;
+
+  // ✅ 인식된 문장 실시간 출력(어두운 박스)
+  ensureHeardBox();
+  const liveText = res.isFinal
+    ? (state.heardRaw ? (state.heardRaw + " " + tr) : tr)
+    : (state.heardRaw ? (state.heardRaw + " " + tr) : tr);
+  if (els.heardBox) els.heardBox.textContent = liveText;
+
+  // ✅ 현재 절 텍스트와 유사도 비교
+  const v = state.verses[state.currentVerseIdx] || "";
+  if (!v) return;
+  if (Date.now() < state.ignoreUntilTs) return;
+
+  // 칠하기(시각 효과용): 유사도 비율만큼 대략 칠해줌
+  const sim = similarityToTarget(v, liveText);   // 0.0 ~ 1.0
+  const targetLenJamo = (state.targetJ || normalizeToJamo(v, false)).length;
+  const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
+  schedulePaint(paintTo);
+
+  // 👇 최종결과가 들어왔고, 유사도 90% 이상이면 다음 절로 이동
+  if (res.isFinal && sim >= 0.90) {
+    // 누적 원문 업데이트
+    state.heardRaw = liveText;
+    // 다음 절로
+    if (!state._advancing) {
+      state._advancing = true;
+      setTimeout(() => {
+        completeVerse(true);
+        state._advancing = false;
+      }, 120);
+    }
+    return;
+  }
+
+  // 최종결과지만 90% 미만이면 누적만 하고(넘어가지 않음) 계속 듣기
+  if (res.isFinal && sim < 0.50) {
+    state.heardRaw = liveText; // 누적 유지
+  }
+};
+
    
      // 🔁 onend 이벤트 (다음 루프)
      const restart = () => {
