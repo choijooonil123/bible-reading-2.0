@@ -70,6 +70,7 @@
     autoAdvance: document.getElementById("autoAdvance"),
     micBar: document.getElementById("micBar"),
     micDb: document.getElementById("micDb"),
+    verseContainer: document.getElementById("verseContainer"),
   };
 
   // 모달이 닫혀있을 때는 클릭 차단
@@ -127,6 +128,26 @@
     if (hint) hint.textContent = `음성매칭 엄격도: ${MATCH_STRICTNESS}`;
   }
 
+// 🆕 인식된 문장 출력 박스 만들기
+function setupHeardOut(){
+  if (!els.verseContainer) return;
+  let box = document.getElementById("heardOut");
+  if (!box){
+    box = document.createElement("div");
+    box.id = "heardOut";
+    box.style.marginTop = "8px";
+    box.style.padding = "8px 10px";
+    box.style.border = "1px solid #e2e8f0";
+    box.style.borderRadius = "8px";
+    box.style.background = "#f8fafc";
+    box.innerHTML = '<small class="muted">🎧 인식된 문장</small><div id="heardTextLine" style="margin-top:4px; font-size:14px; line-height:1.4;"></div>';
+    els.verseContainer.appendChild(box);
+  }
+  els.heardTextLine = document.getElementById("heardTextLine");
+}
+setupHeardOut();
+
+   
   // ---------- bible.json ----------
   async function loadBible() {
     try {
@@ -524,7 +545,8 @@
     const v = state.verses[state.currentVerseIdx] || "";
     state.paintedPrefix = 0;
     state.heardJ = "";
-    state.heardText = "";                  // 🆕 텍스트 버퍼 초기화
+    state.heardText = "";                        // 🆕
+    if (els.heardTextLine) els.heardTextLine.textContent = "";  // 🆕
     state.ignoreUntilTs = 0;
     state._advancing = false;
     if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
@@ -700,11 +722,25 @@ recog.onresult = (evt)=>{
 
   // 4-1) 화면에 "현재까지 인식된 문장"을 바로 보여주기
   // (Android는 interim이 적어 마지막 결과 위주, 데스크톱은 실시간으로 뜸)
-  if (!res.isFinal){
-    if (els.listenHint){
-      els.listenHint.textContent = `인식 중: ${tr}`;
-    }
-  }
+   // --- onresult 내부: res, tr 추출한 직후에 (interim 표시) ---
+   if (!res.isFinal){
+     // 실시간(중간) 인식 문자열 표시
+     if (els.heardTextLine) els.heardTextLine.textContent = tr;
+     if (els.listenHint) els.listenHint.textContent = `인식 중…`;
+   }
+   
+   // --- 기존 누적 처리 이후, 최종 결과가 내려왔을 때 표시 ---
+   if (res.isFinal) {
+     // 최종 텍스트 누적(기존 코드에 이미 추가했다면 중복 제거 OK)
+     state.heardText = (state.heardText ? (state.heardText + " ") : "") + tr.trim();
+   
+     // 화면에 최종 텍스트 출력
+     if (els.heardTextLine) els.heardTextLine.textContent = state.heardText;
+     if (els.listenHint) els.listenHint.textContent = "최종 인식 완료";
+   
+     // (여기 아래는 기존의 유사도 판단/다음 절 이동 로직 그대로 두시면 됩니다)
+ }
+
 
   // 4-2) 기존 자모 누적/페인트는 그대로 유지 (시각 피드백)
   const targetJ = state.targetJ || normalizeToJamo(v, false);
