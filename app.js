@@ -30,6 +30,33 @@
   }
   initFirebase();
 
+   // ✅ HTTPS 권장(안드로이드에서 마이크/음성인식 안정)
+if (location.protocol !== "https:") {
+  console.warn("[권장] GitHub Pages 등 HTTPS 환경에서 실행하세요.");
+}
+
+// ✅ 화면 꺼짐 방지 (지원 기기만)
+let wakeLock = null;
+async function keepAwake(on){
+  if (!('wakeLock' in navigator)) return;
+  try{
+    if (on && !wakeLock){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', ()=>{ wakeLock=null; });
+    } else if (!on && wakeLock){
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  }catch(e){
+    console.warn("[WakeLock] 실패/해제:", e);
+  }
+}
+document.addEventListener('visibilitychange', ()=>{
+  if (document.visibilityState === 'visible') { if (state.listening) keepAwake(true); }
+  else { keepAwake(false); }
+});
+
+
   // ---------- Screens ----------
   const scrLogin = document.getElementById("screen-login");
   const scrApp   = document.getElementById("screen-app");
@@ -667,191 +694,160 @@ setupHeardOut();
 
   // ---------- SpeechRecognition (간단 루프: 버튼 토글용) ----------
   function supportsSR(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
-  function makeRecognizer(){
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return null;
-    const r = new SR();
-    r.lang = 'ko-KR';
-    r.continuous = !IS_ANDROID;
-    r.interimResults = !IS_ANDROID ? true : false;
-    try { r.maxAlternatives = 4; } catch(_) {}
-    return r;
-  }
+   function makeRecognizer(){
+     // ✅ Android는 webkitSpeechRecognition 우선
+     const SR = IS_ANDROID
+       ? (window.webkitSpeechRecognition || window.SpeechRecognition)
+       : (window.SpeechRecognition || window.webkitSpeechRecognition);
+   
+     if (!SR) return null;
+   
+     const r = new SR();
+     r.lang = 'ko-KR';
+     r.continuous = !IS_ANDROID; // Android: false (짧게 끊어 인식이 더 안정적)
+     r.interimResults = false;   // Android: 임시결과 끄기
+     try { r.maxAlternatives = 1; } catch(_) {}
+     return r;
+   }
+
   let loopTimer=null, watchdogTimer=null, noResultTimer=null;
   const ANDROID_WATCHDOG_MS  = 8500;
   const ANDROID_NORESULT_MS  = 7000;
   let lastStartTs=0, lastResultTs=0;
 
-  function runRecognizerLoop(){
+function runRecognizerLoop(){
+  if (!state.listening) return;
+  const recog = makeRecognizer();
+  if (!recog) {
+    els.listenHint && (els.listenHint.innerHTML="⚠️ 음성인식 미지원(Chrome/Safari 권장)");
+    alert("이 브라우저는 음성인식을 지원하지 않습니다.");
+    stopListening();
+    return;
+  }
+  state.recog = recog;
+
+  // 결과 처리
+  recog.onresult = (evt)=>{
+    lastResultTs = Date.now();
+    if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
+    noResultTimer = setTimeout(() => {
+      if (!state.listening) return;
+      try { state.recog && state.recog.abort?.(); } catch(_) {}
+      runRecognizerLoop();
+    }, ANDROID_NORESULT_MS);
+
+    const v = state.verses[state.currentVerseIdx] || "";
+    if (!v) return;
+    if (Date.now() < state.ignoreUntilTs) return;
+
+    const res = evt.results[evt.results.length-1]; if (!res) return;
+    const tr = res[0]?.transcript || ""; if (!tr) return;
+
+    const targetJ = state.targetJ || normalizeToJamo(v, false);
+    const pieceJ  = normalizeToJamo(tr, true);
+
+    if (res.isFinal || IS_ANDROID) {
+      state.heardJ = (state.heardJ + pieceJ);
+      const cap = targetJ.length * 3;
+      if (state.heardJ.length > cap) state.heardJ = state.heardJ.slice(-cap);
+    }
+
+    const tmpHeard = state.heardJ + (res.isFinal ? "" : pieceJ);
+
+    // 간단 페인트: 들린 길이만큼 표시 (정교 매칭은 별도)
+    const k = Math.min(targetJ.length, tmpHeard.length);
+    schedulePaint(k);
+
+    const fullyPainted = Math.max(state.paintedPrefix, state.pendingPaint) >= targetJ.length;
+    if (!state._advancing && fullyPainted) {
+      state._advancing = true;
+      setTimeout(() => {
+        completeVerse(true);
+        state._advancing = false;
+      }, 120);
+      return;
+    }
+  };
+
+  // ✅ 추가 1: 인식 실패시 빠른 재시작
+  recog.onnomatch = () => {
     if (!state.listening) return;
-    const recog = makeRecognizer();
-    if (!recog) {
-      els.listenHint && (els.listenHint.innerHTML="⚠️ 음성인식 미지원(Chrome/Safari 권장)");
-      alert("이 브라우저는 음성인식을 지원하지 않습니다.");
-      stopListening();
-      return;
-    }
-    state.recog = recog;
+    try { recog.abort?.(); } catch(_) {}
+    loopTimer = setTimeout(runRecognizerLoop, 200);
+  };
 
-    recog.onresult = (evt)=>{
-      lastResultTs = Date.now();
-      if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-      noResultTimer = setTimeout(() => {
-        if (!state.listening) return;
-        try { state.recog && state.recog.abort?.(); } catch(_) {}
-        runRecognizerLoop();
-      }, ANDROID_NORESULT_MS);
+  // ✅ 추가 2: 일부 기기에서 onend 미호출 보완
+  recog.onaudioend = () => {
+    if (!state.listening) return;
+    try { recog.abort?.(); } catch(_) {}
+    loopTimer = setTimeout(runRecognizerLoop, 200);
+  };
 
-      const v = state.verses[state.currentVerseIdx] || "";
-      if (!v) return;
-      if (Date.now() < state.ignoreUntilTs) return;
-
-      const res = evt.results[evt.results.length-1]; if (!res) return;
-      const tr = res[0]?.transcript || ""; if (!tr) return;
-
-        // 4-1) 화면에 "현재까지 인식된 문장"을 바로 보여주기
-// --- onresult 내부: res, tr 추출한 직후에 (interim 표시) ---
-if (!res.isFinal){
-  // 실시간(중간) 인식 문자열 표시
-  if (els.heardTextLine) els.heardTextLine.textContent = tr;
-  if (els.listenHint) els.listenHint.textContent = `인식 중…`;
-}
-
-// --- 기존 누적 처리 이후, 최종 결과가 내려왔을 때 표시 ---
-if (res.isFinal) {
-  // 최종 텍스트 누적(기존 코드에 이미 추가했다면 중복 제거 OK)
-  state.heardText = (state.heardText ? (state.heardText + " ") : "") + tr.trim();
-
-  // 화면에 최종 텍스트 출력
-  if (els.heardTextLine) els.heardTextLine.textContent = state.heardText;
-  if (els.listenHint) els.listenHint.textContent = "최종 인식 완료";
-
-  // (여기 아래는 기존의 유사도 판단/다음 절 이동 로직 그대로 두시면 됩니다)
-}
-
-
-      const targetJ = state.targetJ || normalizeToJamo(v, false);
-      const pieceJ  = normalizeToJamo(tr, true);
-
-        if (res.isFinal || IS_ANDROID) {
-          // 최종 결과를 "문장 버퍼"에 누적해서 보여줌
-          state.heardText = (state.heardText ? (state.heardText + " ") : "") + tr.trim();
-      
-          // 자모 버퍼도 유지 (페인트용)
-          state.heardJ = (state.heardJ + pieceJ);
-          const cap = targetJ.length * 3;
-          if (state.heardJ.length > cap) state.heardJ = state.heardJ.slice(-cap);
-        }
-
-      const tmpHeard = state.heardJ + (res.isFinal ? "" : pieceJ);
-
-      // 간단: 들린 길이를 그대로 칠하기 예시(실제는 정교한 매칭 사용 가능)
-      const k = Math.min(targetJ.length, tmpHeard.length);
-      schedulePaint(k);
-
-  // 4-3) 최종 인식이 내려왔을 때, 유사도 평가 → 90% 이상이면 다음 절로
-  if (res.isFinal) {
-    const sim = similarityToTarget(v, state.heardText);
-    const pct = Math.round(sim * 100);
-
-    if (els.listenHint){
-      els.listenHint.textContent = `인식: ${state.heardText} (유사도 ${pct}%)`;
-    }
-
-    if (sim >= 0.90) {
-      // 통과 → 다음 절
-      if (!state._advancing) {
-        state._advancing = true;
-        setTimeout(() => {
-          completeVerse(true);
-          state._advancing = false;
-        }, 120);
-      }
-      return;
-    } else {
-      // 미달 → 재시도 (버퍼 리셋, 계속 듣기 유지)
-      state.paintedPrefix = 0;
-      state.pendingPaint = 0;
-      paintRead(0);
-
-      state.heardJ = "";
-      state.heardText = "";
-
-      if (els.listenHint){
-        els.listenHint.textContent = `유사도 ${pct}% (90% 미만) · 다시 말씀해 주세요`;
-      }
-
-      // Android 연속인식 특성상 타임아웃 루프가 계속 작동 → 그대로 듣기 유지
-      // 필요 시 짧은 무시 시간
-      state.ignoreUntilTs = Date.now() + 200;
-    }
-  }
-
-  // (선택) 본문 전부 칠해지면 시각 피드백상 완료처럼 보이지만,
-  // 이제는 "유사도 90%"가 실제 완료 기준이므로, 여기서는 자동 이동하지 않습니다.
-};
-
-    const restart = () => {
-      if (!state.listening) return;
-      if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
-      if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
-      try {
-        if (state.recog) {
-          state.recog.onresult=null; state.recog.onend=null; state.recog.onerror=null;
-          state.recog.abort?.();
-        }
-      } catch(_) {}
-      loopTimer = setTimeout(runRecognizerLoop, 200);
-    };
-    recog.onend = restart;
-
-    recog.onerror = (e)=>{
-      const err = e?.error || "";
-      if (err === "aborted" || err === "no-speech") {
-        if (!state.listening) return;
-        if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
-        if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
-        loopTimer = setTimeout(runRecognizerLoop, 300);
-        return;
-      }
-      console.warn("[SR] error:", err, e);
-      if (!state.listening) return;
-      if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
-      if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
-      loopTimer = setTimeout(runRecognizerLoop, 400);
-      if (err === "not-allowed" || err === "service-not-allowed") {
-        alert("마이크 권한이 필요합니다. 주소창 오른쪽 마이크 아이콘을 확인하세요.");
-      }
-    };
-
+  // 정상 종료 → 곧바로 재시작
+  const restart = () => {
+    if (!state.listening) return;
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
+    if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
     try {
-      lastStartTs  = Date.now();
-      lastResultTs = lastStartTs;
+      if (state.recog) {
+        state.recog.onresult=null; state.recog.onend=null; state.recog.onerror=null;
+        state.recog.onnomatch=null; state.recog.onaudioend=null;
+        state.recog.abort?.();
+      }
+    } catch(_) {}
+    loopTimer = setTimeout(runRecognizerLoop, 200);
+  };
+  recog.onend = restart;
 
-      if (watchdogTimer) { clearTimeout(watchdogTimer); }
-      watchdogTimer = setTimeout(() => {
-        if (!state.listening) return;
-        if (lastResultTs === lastStartTs) {
-          try { state.recog && state.recog.abort?.(); } catch(_) {}
-          runRecognizerLoop();
-        }
-      }, ANDROID_WATCHDOG_MS);
-
-      if (noResultTimer) { clearTimeout(noResultTimer); }
-      noResultTimer = setTimeout(() => {
-        if (!state.listening) return;
-        try { state.recog && state.recog.abort?.(); } catch(_) {}
-        runRecognizerLoop();
-      }, ANDROID_NORESULT_MS);
-
-      recog.start();
-    } catch(e) {
-      console.warn("recog.start 실패:", e);
+  // 오류 → 재시작(권한 오류는 안내)
+  recog.onerror = (e)=>{
+    const err = e?.error || "";
+    if (err === "aborted" || err === "no-speech") {
+      if (!state.listening) return;
       if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
       if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
-      loopTimer = setTimeout(runRecognizerLoop, 150);
+      loopTimer = setTimeout(runRecognizerLoop, 300);
+      return;
     }
+    console.warn("[SR] error:", err, e);
+    if (!state.listening) return;
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
+    if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
+    loopTimer = setTimeout(runRecognizerLoop, 400);
+    if (err === "not-allowed" || err === "service-not-allowed") {
+      alert("마이크 권한이 필요합니다. 주소창 오른쪽 마이크 아이콘을 확인하세요.");
+    }
+  };
+
+  // 시작 + 워치독
+  try {
+    lastStartTs  = Date.now();
+    lastResultTs = lastStartTs;
+
+    if (watchdogTimer) { clearTimeout(watchdogTimer); }
+    watchdogTimer = setTimeout(() => {
+      if (!state.listening) return;
+      if (lastResultTs === lastStartTs) {
+        try { state.recog && state.recog.abort?.(); } catch(_) {}
+        runRecognizerLoop();
+      }
+    }, ANDROID_WATCHDOG_MS);
+
+    if (noResultTimer) { clearTimeout(noResultTimer); }
+    noResultTimer = setTimeout(() => {
+      if (!state.listening) return;
+      try { state.recog && state.recog.abort?.(); } catch(_) {}
+      runRecognizerLoop();
+    }, ANDROID_NORESULT_MS);
+
+    recog.start();
+  } catch(e) {
+    console.warn("recog.start 실패:", e);
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
+    if (noResultTimer)   { clearTimeout(noResultTimer); noResultTimer=null; }
+    loopTimer = setTimeout(runRecognizerLoop, 150);
   }
+}
 
   async function startListening(showAlert=true){
     if (state.listening) return;
@@ -872,6 +868,9 @@ if (res.isFinal) {
     els.btnToggleMic && (els.btnToggleMic.textContent="⏹️");
 
     refreshRecogModeLock();
+     await new Promise(r=>setTimeout(r, 120)); // Android 초기화 여유
+     keepAwake(true);                          // 🔋 화면 꺼짐 방지
+
     runRecognizerLoop();
   }
 
@@ -889,6 +888,8 @@ if (res.isFinal) {
     if (resetBtn && els.btnToggleMic) els.btnToggleMic.textContent="🎙️";
     stopMicLevel();
     refreshRecogModeLock();
+    keepAwake(false);
+
   }
 
   els.btnToggleMic?.addEventListener("click", ()=>{ if(!state.listening) startListening(); else stopListening(); });
