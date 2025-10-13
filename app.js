@@ -93,6 +93,7 @@
     heardJ: "",         // 누적 음성(자모) 버퍼
     _advancing:false,   // 자동 이동 제어
     paintTimer: null,   // 🎚️ 약간 늦게 칠하기용 타이머
+    heardText: "",      // 🆕 마지막 인식된 원문 텍스트(표시용)
     pendingPaint: 0
   };
 
@@ -451,6 +452,51 @@
     t = t.replace(/[^\p{L}\p{N} ]/gu," ").replace(/\s+/g," ").trim();
     return decomposeJamo(t).replace(/\s+/g,"");
   }
+
+   // 🆕 Levenshtein 거리 (메모리 O(min(n,m)) 버전)
+   function levenshteinDistance(a, b){
+     const n = a.length, m = b.length;
+     if (n === 0) return m;
+     if (m === 0) return n;
+   
+     // 짧은 쪽을 DP 배열로 사용
+     let s = a, t = b;
+     if (m < n) { s = b; t = a; } // 보장: s가 더 짧음
+     const rows = s.length + 1;
+     const cols = t.length + 1;
+   
+     const dp = new Uint16Array(rows);
+     for (let i=0;i<rows;i++) dp[i]=i;
+   
+     for (let j=1;j<cols;j++){
+       let prev = dp[0];         // dp[i-1][j-1]
+       dp[0] = j;                // dp[0][j]
+       for (let i=1;i<rows;i++){
+         const tmp = dp[i];      // dp[i][j-1] (저장)
+         const cost = (s[i-1] === t[j-1]) ? 0 : 1;
+         dp[i] = Math.min(
+           dp[i] + 1,            // 삭제
+           dp[i-1] + 1,          // 삽입
+           prev + cost           // 치환/일치
+         );
+         prev = tmp;
+       }
+     }
+     return dp[rows-1];
+   }
+   
+   // 🆕 0.0~1.0 유사도 (자모 기준)
+   function similarityToTarget(targetText, spokenText){
+     const tJ = normalizeToJamo(targetText, true);   // 발음 치환 반영
+     const sJ = normalizeToJamo(spokenText, true);
+     if (!tJ.length && !sJ.length) return 1;
+     if (!tJ.length || !sJ.length) return 0;
+     const dist = levenshteinDistance(tJ, sJ);
+     const denom = Math.max(tJ.length, sJ.length, 1);
+     return 1 - (dist / denom);
+   }
+
+   
   function buildCharToJamoCumMap(str){
     const jamoLens = [];
     const cum = [0];
@@ -469,6 +515,7 @@
     const v = state.verses[state.currentVerseIdx] || "";
     state.paintedPrefix = 0;
     state.heardJ = "";
+    state.heardText = "";                  // 🆕 텍스트 버퍼 초기화
     state.ignoreUntilTs = 0;
     state._advancing = false;
     if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
@@ -492,6 +539,10 @@
     if (els.verseGrid) {
       [...els.verseGrid.children].forEach((btn, idx) =>
         btn.classList.toggle("active", idx===state.currentVerseIdx));
+    }
+      // 🆕 안내에 현재 상태 표시
+    if (els.listenHint){
+       els.listenHint.textContent = "음성을 말씀하시면 인식된 문장을 아래에 보여드려요. (유사도 90% 이상이면 자동으로 다음 절)";
     }
   }
   function paintRead(prefixJamoLen){
@@ -636,14 +687,26 @@
       const res = evt.results[evt.results.length-1]; if (!res) return;
       const tr = res[0]?.transcript || ""; if (!tr) return;
 
+        // 4-1) 화면에 "현재까지 인식된 문장"을 바로 보여주기
+        // (Android는 interim이 적어 마지막 결과 위주, 데스크톱은 실시간으로 뜸)
+        if (!res.isFinal){
+          if (els.listenHint){
+            els.listenHint.textContent = `인식 중: ${tr}`;
+          }
+        }
+
       const targetJ = state.targetJ || normalizeToJamo(v, false);
       const pieceJ  = normalizeToJamo(tr, true);
 
-      if (res.isFinal || IS_ANDROID) {
-        state.heardJ = (state.heardJ + pieceJ);
-        const cap = targetJ.length * 3;
-        if (state.heardJ.length > cap) state.heardJ = state.heardJ.slice(-cap);
-      }
+        if (res.isFinal || IS_ANDROID) {
+          // 최종 결과를 "문장 버퍼"에 누적해서 보여줌
+          state.heardText = (state.heardText ? (state.heardText + " ") : "") + tr.trim();
+      
+          // 자모 버퍼도 유지 (페인트용)
+          state.heardJ = (state.heardJ + pieceJ);
+          const cap = targetJ.length * 3;
+          if (state.heardJ.length > cap) state.heardJ = state.heardJ.slice(-cap);
+        }
 
       const tmpHeard = state.heardJ + (res.isFinal ? "" : pieceJ);
 
@@ -651,16 +714,47 @@
       const k = Math.min(targetJ.length, tmpHeard.length);
       schedulePaint(k);
 
-      const fullyPainted = Math.max(state.paintedPrefix, state.pendingPaint) >= targetJ.length;
-      if (!state._advancing && fullyPainted) {
+  // 4-3) 최종 인식이 내려왔을 때, 유사도 평가 → 90% 이상이면 다음 절로
+  if (res.isFinal) {
+    const sim = similarityToTarget(v, state.heardText);
+    const pct = Math.round(sim * 100);
+
+    if (els.listenHint){
+      els.listenHint.textContent = `인식: ${state.heardText} (유사도 ${pct}%)`;
+    }
+
+    if (sim >= 0.90) {
+      // 통과 → 다음 절
+      if (!state._advancing) {
         state._advancing = true;
         setTimeout(() => {
           completeVerse(true);
           state._advancing = false;
         }, 120);
-        return;
       }
-    };
+      return;
+    } else {
+      // 미달 → 재시도 (버퍼 리셋, 계속 듣기 유지)
+      state.paintedPrefix = 0;
+      state.pendingPaint = 0;
+      paintRead(0);
+
+      state.heardJ = "";
+      state.heardText = "";
+
+      if (els.listenHint){
+        els.listenHint.textContent = `유사도 ${pct}% (90% 미만) · 다시 말씀해 주세요`;
+      }
+
+      // Android 연속인식 특성상 타임아웃 루프가 계속 작동 → 그대로 듣기 유지
+      // 필요 시 짧은 무시 시간
+      state.ignoreUntilTs = Date.now() + 200;
+    }
+  }
+
+  // (선택) 본문 전부 칠해지면 시각 피드백상 완료처럼 보이지만,
+  // 이제는 "유사도 90%"가 실제 완료 기준이므로, 여기서는 자동 이동하지 않습니다.
+};
 
     const restart = () => {
       if (!state.listening) return;
