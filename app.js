@@ -564,13 +564,6 @@
     state._advancing = false;
     if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
 
-   // ✅ 절이 바뀔 때 이전 전사 누적도 완전 초기화 (강력 중복제거 버퍼까지)
-   if (state._sr) {
-     state._sr.historyTokens = [];
-     state._sr.historyBase   = [];
-   }
-   if (typeof _renderInterim === "function") _renderInterim(''); // 표시 영역도 깔끔히
-     
     state.targetJ = normalizeToJamo(v, false);
     state.charCumJamo = buildCharToJamoCumMap(v);
 
