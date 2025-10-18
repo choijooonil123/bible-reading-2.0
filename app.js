@@ -755,17 +755,9 @@
 
   ensureHeardBox();
 
-   // 교체 전
-   // function _finalText(){
-   //   return _punctuate(state._sr.historyTokens.join(' '));
-   // }
-   
-   // 교체 후: 최종 전사를 구두점 보정한 뒤, 남아있을 수 있는 모든 숫자를 한글로 변환
-   function _finalText(){
-      const s = _punctuate(state._sr.historyTokens.join(' '));
-      return (window.__numbersToHangul ? window.__numbersToHangul(s) : s);
-   }
-
+  function _finalText(){
+    return _punctuate(state._sr.historyTokens.join(' '));
+  }
   function _renderInterim(interim){
     if(!els.heardBox) return;
     if(interim){
@@ -905,9 +897,8 @@
       }
       return sign + intToHangul(tok);
     }
-    // 어디에 붙어있든(예: '3절', '창6:15', '2025년') 모든 숫자를 잡아 한글로 변환
-    // const NUM_RE = /(?<![\p{L}\p{N}])[+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?/gu;
-    const NUM_RE = /[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
+    const NUM_RE = /(?<![\p{L}\p{N}])[+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?/gu;
+
     window.__numbersToHangul = function(str){
       if (!str) return str;
       return String(str).replace(NUM_RE, m => numberTokenToHangul(m));
