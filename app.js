@@ -755,9 +755,17 @@
 
   ensureHeardBox();
 
-  function _finalText(){
-    return _punctuate(state._sr.historyTokens.join(' '));
-  }
+   // 교체 전
+   // function _finalText(){
+   //   return _punctuate(state._sr.historyTokens.join(' '));
+   // }
+   
+   // 교체 후: 최종 전사를 구두점 보정한 뒤, 남아있을 수 있는 모든 숫자를 한글로 변환
+   function _finalText(){
+     const s = _punctuate(state._sr.historyTokens.join(' '));
+     return (window.__numbersToHangul ? window.__numbersToHangul(s) : s);
+   }
+
   function _renderInterim(interim){
     if(!els.heardBox) return;
     if(interim){
