@@ -71,7 +71,7 @@
     micBar: document.getElementById("micBar"),
     micDb: document.getElementById("micDb"),
     verseContainer: document.getElementById("verseContainer"),
-    heardBox: document.getElementById("heardBox"),            // ⬅️ 추가
+    heardBox: document.getElementById("heardBox"),
   };
    
   // 인식문장 박스가 없으면 동적 생성 + 어두운 스타일
@@ -796,6 +796,172 @@
     try { r.maxAlternatives = 4; } catch(_){}
     return r;
   }
+
+  // === "음성명령 다시" 리셋 명령 & 세션 리셋 ===
+  const RESET_KW_RE = /음성명령\s*다시/i;
+  function _containsResetCommand(txt){
+    if(!txt) return false;
+    const s = String(txt).replace(/\s+/g,' ').trim();
+    return RESET_KW_RE.test(s);
+  }
+  async function _resetRecognitionSession(){
+    if(state._sr?.rec){
+      try{
+        state._sr.rec.onresult = null;
+        state._sr.rec.onerror  = null;
+        state._sr.rec.onend    = null;
+        state._sr.rec.abort?.();
+        state._sr.rec.stop?.();
+      }catch(_){}
+      state._sr.rec = null;
+    }
+    state._sr.historyTokens = [];
+    state._sr.historyBase   = [];
+    state.heardRaw  = "";
+    state.heardText = "";
+    state.heardJ    = "";
+    state.paintedPrefix = 0;
+    state.pendingPaint  = 0;
+    state.ignoreUntilTs = 0;
+    state._advancing    = false;
+    if (state.paintTimer){ clearTimeout(state.paintTimer); state.paintTimer = null; }
+    if (els.heardBox) els.heardBox.textContent = "";
+    paintRead(0);
+
+    state._sr.userStopped = false;
+    state._sr.listening   = true;
+
+    state._sr.rec = _createRecognizer();
+    if(!state._sr.rec){
+      els.listenHint && (els.listenHint.textContent = "음성인식 초기화 실패");
+      return;
+    }
+    _wireRecognizerHandlers(state._sr.rec);
+    try { state._sr.rec.start(); } catch(e){ console.warn("reset start 실패:", e); }
+  }
+
+  // ===== 숫자 → 한글 변환 유틸 =====
+  (function(){
+    const DIG = ["영","일","이","삼","사","오","육","칠","팔","구"];
+    const SMALL = ["","십","백","천"];
+    const BIG = ["","만","억","조","경"]; // 확장 가능
+
+    function chunkUnder10000(n){
+      n = Number(n);
+      if (!Number.isFinite(n) || n <= 0) return "";
+      const d = String(n).padStart(4,"0").split("").map(x=>+x);
+      let out = "";
+      for (let i=0;i<4;i++){
+        const val = d[i];
+        if (val===0) continue;
+        const unit = SMALL[3-i];
+        if (unit){
+          out += (val===1 ? "" : DIG[val]) + unit;
+        } else {
+          out += DIG[val];
+        }
+      }
+      return out || "";
+    }
+    function intToHangul(intStr){
+      intStr = intStr.replace(/,/g,"").replace(/^0+(?=\d)/,"");
+      if (intStr === "" || /^0+$/.test(intStr)) return DIG[0];
+      const groups = [];
+      for (let i=intStr.length; i>0; i-=4){
+        groups.push(intStr.substring(Math.max(0,i-4), i));
+      }
+      const parts = [];
+      for (let i=0;i<groups.length;i++){
+        const num = parseInt(groups[i],10);
+        if (!num) continue;
+        const w = chunkUnder10000(num);
+        if (w) parts.unshift(w + BIG[i]);
+      }
+      return parts.length ? parts.join("") : DIG[0];
+    }
+    function decimalToHangul(rightStr){
+      return rightStr.split("").map(ch => /\d/.test(ch) ? DIG[+ch] : ch).join("");
+    }
+    function numberTokenToHangul(tok){
+      let sign = "";
+      if (/^[+-]/.test(tok)){
+        sign = tok[0] === "-" ? "마이너스 " : "";
+        tok = tok.slice(1);
+      }
+      tok = tok.replace(/,/g,"");
+      if (tok.includes(".")){
+        const [L,R] = tok.split(".");
+        const left = L ? intToHangul(L) : DIG[0];
+        const right = R ? decimalToHangul(R) : "";
+        return sign + left + " 점" + (right ? " " + right : "");
+      }
+      return sign + intToHangul(tok);
+    }
+    const NUM_RE = /(?<![\p{L}\p{N}])[+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?/gu;
+
+    window.__numbersToHangul = function(str){
+      if (!str) return str;
+      return String(str).replace(NUM_RE, m => numberTokenToHangul(m));
+    };
+  })();
+
+  // 인식기 핸들러 장착(재사용)
+  function _wireRecognizerHandlers(rec){
+    rec.onresult = (e) => {
+      let interim = '';
+      let fin = '';
+      for (let i = e.resultIndex; i < e.results.length; i++){
+        const r = e.results[i];
+        if(r.isFinal) fin += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+
+      // 리셋 명령(최종) 감지 → 완전 리셋
+      if (fin && _containsResetCommand(fin)) {
+        _resetRecognitionSession();
+        return;
+      }
+
+      // 최종 결과: 숫자→한글 변환 후 누적/매칭
+      if(fin){
+        const finClean = fin.replace(RESET_KW_RE, ' ').trim();
+        const finHangul = window.__numbersToHangul ? window.__numbersToHangul(finClean) : finClean;
+        if (finHangul){
+          _appendFinalDedup(finHangul);
+          const finalNow = _finalText();
+          state.heardRaw = finalNow;
+          _renderInterim('');
+          _applyMatchingAndMaybeAdvance(true, finalNow);
+        }
+      }
+
+      // 임시 결과: 숫자→한글 변환 후 표시/페인트
+      if(interim){
+        const interimHangul = window.__numbersToHangul ? window.__numbersToHangul(interim) : interim;
+        const candidate = (_finalText() + ' ' + interimHangul).trim();
+        _renderInterim(interimHangul);
+        _applyMatchingAndMaybeAdvance(false, candidate);
+      }
+    };
+
+    rec.onerror = (e) => {
+      const err = e?.error || '';
+      if (err === 'not-allowed' || err === 'service-not-allowed'){
+        els.listenHint && (els.listenHint.textContent = "마이크 권한이 거부되었습니다. 주소창의 마이크 아이콘을 확인하세요.");
+      } else if (err === 'network'){
+        els.listenHint && (els.listenHint.textContent = "네트워크 오류로 인식이 중단되었습니다.");
+      } else {
+        els.listenHint && (els.listenHint.textContent = `인식 오류: ${err}`);
+      }
+    };
+
+    rec.onend = () => {
+      if(!state._sr.userStopped){
+        try { state._sr.rec && state._sr.rec.start(); } catch(_){}
+      }
+    };
+  }
+
   async function startListening(showAlert=true){
     if (state._sr.listening) return;
     if (!supportsSR()){
@@ -826,46 +992,7 @@
       return;
     }
 
-    state._sr.rec.onresult = (e) => {
-      let interim = '';
-      let fin = '';
-      for (let i = e.resultIndex; i < e.results.length; i++){
-        const r = e.results[i];
-        if(r.isFinal) fin += r[0].transcript;
-        else interim += r[0].transcript;
-      }
-
-      if(fin){
-        _appendFinalDedup(fin);
-        const finalNow = _finalText();
-        state.heardRaw = finalNow;
-        _renderInterim('');
-        _applyMatchingAndMaybeAdvance(true, finalNow);
-      }
-
-      if(interim){
-        const candidate = (_finalText() + ' ' + interim).trim();
-        _renderInterim(interim);
-        _applyMatchingAndMaybeAdvance(false, candidate);
-      }
-    };
-
-    state._sr.rec.onerror = (e) => {
-      const err = e?.error || '';
-      if (err === 'not-allowed' || err === 'service-not-allowed'){
-        els.listenHint && (els.listenHint.textContent = "마이크 권한이 거부되었습니다. 주소창의 마이크 아이콘을 확인하세요.");
-      } else if (err === 'network'){
-        els.listenHint && (els.listenHint.textContent = "네트워크 오류로 인식이 중단되었습니다.");
-      } else {
-        els.listenHint && (els.listenHint.textContent = `인식 오류: ${err}`);
-      }
-    };
-
-    state._sr.rec.onend = () => {
-      if(!state._sr.userStopped){
-        try { state._sr.rec && state._sr.rec.start(); } catch(_){}
-      }
-    };
+    _wireRecognizerHandlers(state._sr.rec);
 
     try { state._sr.rec.start(); } catch(e){
       console.warn("rec.start 실패:", e);
