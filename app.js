@@ -74,27 +74,26 @@
     heardBox: document.getElementById("heardBox"),            // ⬅️ 추가
   };
    
-   // 인식문장 박스가 없으면 동적 생성 + 어두운 스타일
-   function ensureHeardBox() {
-     if (!els.heardBox) {
-       const box = document.createElement("div");
-       box.id = "heardBox";
-       box.style.cssText = [
-         "margin-top:8px",
-         "padding:8px 10px",
-         "border-radius:8px",
-         "background:#0f1229",   // 🌙 어두운 배경
-         "color:#cfe3ff",         // 밝은 글자
-         "font-size:14px",
-         "line-height:1.5",
-         "white-space:pre-wrap",
-       ].join(";");
-       // verseContainer 아래에 붙이기
-       (els.verseContainer || document.body).appendChild(box);
-       els.heardBox = box;
-     }
-   }
-   ensureHeardBox();
+  // 인식문장 박스가 없으면 동적 생성 + 어두운 스타일
+  function ensureHeardBox() {
+    if (!els.heardBox) {
+      const box = document.createElement("div");
+      box.id = "heardBox";
+      box.style.cssText = [
+        "margin-top:8px",
+        "padding:8px 10px",
+        "border-radius:8px",
+        "background:#0f1229",
+        "color:#cfe3ff",
+        "font-size:14px",
+        "line-height:1.5",
+        "white-space:pre-wrap",
+      ].join(";");
+      (els.verseContainer || document.body).appendChild(box);
+      els.heardBox = box;
+    }
+  }
+  ensureHeardBox();
    
   // 모달이 닫혀있을 때는 클릭 차단
   if (els.matrixModal) els.matrixModal.style.pointerEvents = "none";
@@ -114,11 +113,11 @@
     verseDoneMap: {},
     charCumJamo: [],    // 각 화면 글자까지의 누적 자모 길이
     charJamoLens: [],   // 각 화면 글자의 자모 기여 길이
-    heardJ: "",       // 자모 누적
-    heardRaw: "",     // ⬅️ 음성 인식된 ‘원문 텍스트’ 누적
-    heardText: "",      // 🆕 마지막 인식된 원문 텍스트(표시용)
+    heardJ: "",         // 자모 누적
+    heardRaw: "",       // 음성 인식된 ‘원문 텍스트’ 누적(표시/저장용)
+    heardText: "",      // 마지막 인식 텍스트(표시용)
     _advancing:false,   // 자동 이동 제어
-    paintTimer: null,   // 🎚️ 약간 늦게 칠하기용 타이머
+    paintTimer: null,   // 약간 늦게 칠하기용 타이머
     pendingPaint: 0
   };
 
@@ -152,26 +151,25 @@
     if (hint) hint.textContent = `음성매칭 엄격도: ${MATCH_STRICTNESS}`;
   }
 
-// 🆕 인식된 문장 출력 박스 만들기
-function setupHeardOut(){
-  if (!els.verseContainer) return;
-  let box = document.getElementById("heardOut");
-  if (!box){
-    box = document.createElement("div");
-    box.id = "heardOut";
-    box.style.marginTop = "8px";
-    box.style.padding = "8px 10px";
-    box.style.border = "1px solid #e2e8f0";
-    box.style.borderRadius = "8px";
-    box.style.background = "#f8fafc";
-    box.innerHTML = '<small class="muted">🎧 인식된 문장</small><div id="heardTextLine" style="margin-top:4px; font-size:14px; line-height:1.4;"></div>';
-    els.verseContainer.appendChild(box);
+  // 인식된 문장 출력 박스(밝은 박스) — 필요 시 사용
+  function setupHeardOut(){
+    if (!els.verseContainer) return;
+    let box = document.getElementById("heardOut");
+    if (!box){
+      box = document.createElement("div");
+      box.id = "heardOut";
+      box.style.marginTop = "8px";
+      box.style.padding = "8px 10px";
+      box.style.border = "1px solid #e2e8f0";
+      box.style.borderRadius = "8px";
+      box.style.background = "#f8fafc";
+      box.innerHTML = '<small class="muted">🎧 인식된 문장</small><div id="heardTextLine" style="margin-top:4px; font-size:14px; line-height:1.4;"></div>';
+      els.verseContainer.appendChild(box);
+    }
+    els.heardTextLine = document.getElementById("heardTextLine");
   }
-  els.heardTextLine = document.getElementById("heardTextLine");
-}
-setupHeardOut();
+  setupHeardOut();
 
-   
   // ---------- bible.json ----------
   async function loadBible() {
     try {
@@ -359,13 +357,12 @@ setupHeardOut();
     state.currentBookKo = null; state.currentChapter = null; state.verses = []; state.currentVerseIdx = 0;
   }
 
-  // [추가] 책 드롭다운 채우기 (books.js 로드 지연 대비)
+  // 책 드롭다운 채우기 (books.js 로드 지연 대비)
   function buildBookSelect() {
     if (!els.bookSelect) return;
 
     const books = getBooks();
     if (!books.length) {
-      // books.js가 아직 로드되지 않았으면 잠시 후 재시도
       setTimeout(buildBookSelect, 150);
       return;
     }
@@ -398,7 +395,7 @@ setupHeardOut();
     }
   }
 
-  // [추가] 책 변경 핸들러
+  // 책 변경 핸들러
   els.bookSelect?.addEventListener("change", () => {
     state.currentBookKo = els.bookSelect.value;
     state.currentChapter = null; state.verses = []; state.currentVerseIdx = 0;
@@ -441,7 +438,6 @@ setupHeardOut();
     }
   }
 
-  // [추가] 절/장 키 유틸
   function keyForChapter(){ return `${state.currentBookKo}#${state.currentChapter}`; }
 
   els.chapterGrid?.addEventListener("click", (e) => {
@@ -482,7 +478,7 @@ setupHeardOut();
     }
   }
 
-  // ---------- 표시/매칭 (간략: 글자 페인트만 유지) ----------
+  // ---------- 표시/매칭 ----------
   function decomposeJamo(s){
     const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
     const JUNG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"];
@@ -506,51 +502,42 @@ setupHeardOut();
     t = t.replace(/[^\p{L}\p{N} ]/gu," ").replace(/\s+/g," ").trim();
     return decomposeJamo(t).replace(/\s+/g,"");
   }
-   
-   // 🆕 Levenshtein 거리 (메모리 O(min(n,m)) 버전)
-   function levenshteinDistance(a, b){
-     const n = a.length, m = b.length;
-     if (n === 0) return m;
-     if (m === 0) return n;
-   
-     // 짧은 쪽을 DP 배열로 사용
-     let s = a, t = b;
-     if (m < n) { s = b; t = a; } // 보장: s가 더 짧음
-     const rows = s.length + 1;
-     const cols = t.length + 1;
-   
-     const dp = new Uint16Array(rows);
-     for (let i=0;i<rows;i++) dp[i]=i;
-   
-     for (let j=1;j<cols;j++){
-       let prev = dp[0];         // dp[i-1][j-1]
-       dp[0] = j;                // dp[0][j]
-       for (let i=1;i<rows;i++){
-         const tmp = dp[i];      // dp[i][j-1] (저장)
-         const cost = (s[i-1] === t[j-1]) ? 0 : 1;
-         dp[i] = Math.min(
-           dp[i] + 1,            // 삭제
-           dp[i-1] + 1,          // 삽입
-           prev + cost           // 치환/일치
-         );
-         prev = tmp;
-       }
-     }
-     return dp[rows-1];
-   }
-   
-   // 🆕 0.0~1.0 유사도 (자모 기준)
-   function similarityToTarget(targetText, spokenText){
-     const tJ = normalizeToJamo(targetText, true);   // 발음 치환 반영
-     const sJ = normalizeToJamo(spokenText, true);
-     if (!tJ.length && !sJ.length) return 1;
-     if (!tJ.length || !sJ.length) return 0;
-     const dist = levenshteinDistance(tJ, sJ);
-     const denom = Math.max(tJ.length, sJ.length, 1);
-     return 1 - (dist / denom);
-   }
+  function levenshteinDistance(a, b){
+    const n = a.length, m = b.length;
+    if (n === 0) return m;
+    if (m === 0) return n;
+    let s = a, t = b;
+    if (m < n) { s = b; t = a; }
+    const rows = s.length + 1;
+    const cols = t.length + 1;
+    const dp = new Uint16Array(rows);
+    for (let i=0;i<rows;i++) dp[i]=i;
+    for (let j=1;j<cols;j++){
+      let prev = dp[0];
+      dp[0] = j;
+      for (let i=1;i<rows;i++){
+        const tmp = dp[i];
+        const cost = (s[i-1] === t[j-1]) ? 0 : 1;
+        dp[i] = Math.min(
+          dp[i] + 1,        // 삭제
+          dp[i-1] + 1,      // 삽입
+          prev + cost       // 치환/일치
+        );
+        prev = tmp;
+      }
+    }
+    return dp[rows-1];
+  }
+  function similarityToTarget(targetText, spokenText){
+    const tJ = normalizeToJamo(targetText, true);
+    const sJ = normalizeToJamo(spokenText, true);
+    if (!tJ.length && !sJ.length) return 1;
+    if (!tJ.length || !sJ.length) return 0;
+    const dist = levenshteinDistance(tJ, sJ);
+    const denom = Math.max(tJ.length, sJ.length, 1);
+    return 1 - (dist / denom);
+  }
 
-   
   function buildCharToJamoCumMap(str){
     const jamoLens = [];
     const cum = [0];
@@ -569,10 +556,10 @@ setupHeardOut();
     const v = state.verses[state.currentVerseIdx] || "";
     state.paintedPrefix = 0;
     state.heardJ = "";
-    state.heardRaw = "";                  // ← 추가: 누적 원문 초기화
-    if (els.heardBox) els.heardBox.textContent = "";  // ← 추가: 화면 표시도 초기화
-    state.heardText = "";                        // 🆕
-    if (els.heardTextLine) els.heardTextLine.textContent = "";  // 🆕
+    state.heardRaw = "";
+    if (els.heardBox) els.heardBox.textContent = "";
+    state.heardText = "";
+    if (els.heardTextLine) els.heardTextLine.textContent = "";
     state.ignoreUntilTs = 0;
     state._advancing = false;
     if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
@@ -598,11 +585,9 @@ setupHeardOut();
         btn.classList.toggle("active", idx===state.currentVerseIdx));
     }
 
-     // 🆕 안내에 현재 상태 표시
-     if (els.listenHint){
-       els.listenHint.textContent = "음성을 말씀하시면 인식된 문장을 아래에 보여드려요. (유사도 90% 이상이면 자동으로 다음 절)";
-     }
-   
+    if (els.listenHint){
+      els.listenHint.textContent = "음성을 말씀하시면 인식된 문장을 아래에 보여드려요. (유사도 90% 이상이면 자동으로 다음 절)";
+    }
   }
   function paintRead(prefixJamoLen){
     if (!els.verseText) return;
@@ -702,205 +687,215 @@ setupHeardOut();
     if (els.micDb) els.micDb.textContent = "-∞ dB";
   }
 
-  // ---------- SpeechRecognition (간단 루프: 버튼 토글용) ----------
+  // ---------- SpeechRecognition (v2: 강력 중복제거 + 간단 구두점 보정) ----------
   function supportsSR(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
-   function makeRecognizer(){
-     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-     if (!SR) return null;
-     const r = new SR();
-     r.lang = 'ko-KR';
-     r.continuous = true;        // 항상 연속 인식
-     r.interimResults = true;    // 중간결과도 받기
-     try { r.maxAlternatives = 4; } catch(_) {}
-     return r;
-   }
 
-  let loopTimer=null, watchdogTimer=null, noResultTimer=null;
-  const ANDROID_WATCHDOG_MS  = 8500;
-  const ANDROID_NORESULT_MS  = 7000;
-  let lastStartTs=0, lastResultTs=0;
+  // 전역(상태) 확장: 최종 누적 토큰/베이스 토큰
+  state._sr = {
+    rec: null,
+    listening: false,
+    userStopped: false,
+    historyTokens: [],   // 최종(확정)으로 누적된 "원본 토큰"
+    historyBase: []      // 비교용(말끝 구두점 제거, 소문자)
+  };
 
-   function runRecognizerLoop() {
-     if (!state.listening) return;
-     const recog = makeRecognizer();
-     if (!recog) {
-       els.listenHint && (els.listenHint.innerHTML = "⚠️ 음성인식 미지원(Chrome/Safari 권장)");
-       alert("이 브라우저는 음성인식을 지원하지 않습니다.");
-       stopListening();
-       return;
-     }
-     state.recog = recog;
-   
-recog.onresult = (evt) => {
-  lastResultTs = Date.now();
-
-  // 🔄 no-result 타임아웃 재설정
-  if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-  noResultTimer = setTimeout(() => {
-    if (!state.listening) return;
-    try { state.recog && state.recog.abort?.(); } catch (_) {}
-    runRecognizerLoop();
-  }, 7000);
-
-  const res = evt.results[evt.results.length - 1];
-  if (!res) return;
-  const tr = (res[0]?.transcript || "").trim();
-  if (!tr) return;
-
-  // ✅ 인식된 문장 실시간 출력(어두운 박스)
-  ensureHeardBox();
-  const liveText = res.isFinal
-    ? (state.heardRaw ? (state.heardRaw + " " + tr) : tr)
-    : (state.heardRaw ? (state.heardRaw + " " + tr) : tr);
-  if (els.heardBox) els.heardBox.textContent = liveText;
-
-  // ✅ 현재 절 텍스트와 유사도 비교
-  const v = state.verses[state.currentVerseIdx] || "";
-  if (!v) return;
-  if (Date.now() < state.ignoreUntilTs) return;
-
-  // 칠하기(시각 효과용): 유사도 비율만큼 대략 칠해줌
-  const sim = similarityToTarget(v, liveText);   // 0.0 ~ 1.0
-  const targetLenJamo = (state.targetJ || normalizeToJamo(v, false)).length;
-  const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
-  schedulePaint(paintTo);
-
-  // 👇 최종결과가 들어왔고, 유사도 90% 이상이면 다음 절로 이동
-  if (res.isFinal && sim >= 0.90) {
-    // 누적 원문 업데이트
-    state.heardRaw = liveText;
-    // 다음 절로
-    if (!state._advancing) {
-      state._advancing = true;
-      setTimeout(() => {
-        completeVerse(true);
-        state._advancing = false;
-      }, 120);
+  // ===== 공통 유틸 (상단 샘플과 동일) =====
+  const _normalizeSpaces = s => s.replace(/\s+/g,' ').trim();
+  const _stripPuncTail   = w => w.replace(/[\.,!?;:·…~]+$/u,'');
+  const _tokenize        = s => _normalizeSpaces(s).split(' ').filter(Boolean);
+  const _baseTokens      = tokens => tokens.map(t => _stripPuncTail(t.toLowerCase()));
+  function _punctuate(str){
+    let s = _normalizeSpaces(str);
+    s = s.replace(/([가-힣a-zA-Z0-9\)])\s*(?:\n|$)/g, '$1.\n');
+    s = s.replace(/\.\.+/g,'.');
+    s = s.replace(/(^|[\.!?]\s+)([a-z])/g, (m,p1,p2)=> p1 + p2.toUpperCase());
+    return s;
+  }
+  function _collapseConsecutiveSentences(text){
+    const parts = _normalizeSpaces(text).split(/(?<=[\.!?\u2026\u3002])\s+/);
+    const out = [];
+    for(const p of parts){
+      const t = (p||'').trim(); if(!t) continue;
+      const last = out[out.length-1] || '';
+      if(last === t) continue;
+      if(last && (t.startsWith(last) || last.startsWith(t))){
+        out[out.length-1] = (t.length >= last.length) ? t : last;
+      }else out.push(t);
     }
-    return;
+    return out.join(' ');
+  }
+  function _appendFinalDedup(newText){
+    const T = _tokenize(newText);
+    const B = _baseTokens(T);
+    if(T.length === 0) return;
+
+    if(state._sr.historyTokens.length){
+      const tailLen = Math.min(state._sr.historyBase.length, 80, B.length);
+      let k = 0;
+      for(let len = tailLen; len > 0; len--){
+        const suffix = state._sr.historyBase.slice(-len).join(' ');
+        const prefix = B.slice(0, len).join(' ');
+        if(suffix === prefix){ k = len; break; }
+      }
+      const remainderT = T.slice(k);
+      const remainderB = B.slice(k);
+      if(remainderT.length === 0) return;
+      state._sr.historyTokens = state._sr.historyTokens.concat(remainderT);
+      state._sr.historyBase   = state._sr.historyBase.concat(remainderB);
+    }else{
+      state._sr.historyTokens = T.slice();
+      state._sr.historyBase   = B.slice();
+    }
+
+    const rebuilt = state._sr.historyTokens.join(' ');
+    const compact = _collapseConsecutiveSentences(rebuilt);
+    state._sr.historyTokens = _tokenize(compact);
+    state._sr.historyBase   = _baseTokens(state._sr.historyTokens);
   }
 
-  // 최종결과지만 90% 미만이면 누적만 하고(넘어가지 않음) 계속 듣기
-  if (res.isFinal && sim < 0.50) {
-    state.heardRaw = liveText; // 누적 유지
+  ensureHeardBox();
+
+  function _finalText(){
+    return _punctuate(state._sr.historyTokens.join(' '));
   }
-};
+  function _renderInterim(interim){
+    if(!els.heardBox) return;
+    if(interim){
+      els.heardBox.textContent = _finalText() + ' ' + interim;
+    }else{
+      els.heardBox.textContent = _finalText();
+    }
+  }
+  function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
+    const v = state.verses[state.currentVerseIdx] || "";
+    if(!v) return;
+    if(Date.now() < state.ignoreUntilTs) return;
 
-   
-     // 🔁 onend 이벤트 (다음 루프)
-     const restart = () => {
-       if (!state.listening) return;
-       if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
-       if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-       try {
-         if (state.recog) {
-           state.recog.onresult = null;
-           state.recog.onend = null;
-           state.recog.onerror = null;
-           state.recog.abort?.();
-         }
-       } catch (_) {}
-       loopTimer = setTimeout(runRecognizerLoop, 200);
-     };
-     recog.onend = restart;
-   
-     // ⚠️ 오류 처리
-     recog.onerror = (e) => {
-       const err = e?.error || "";
-       if (err === "aborted" || err === "no-speech") {
-         if (!state.listening) return;
-         if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
-         if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-         loopTimer = setTimeout(runRecognizerLoop, 300);
-         return;
-       }
-       console.warn("[SR] error:", err, e);
-       if (!state.listening) return;
-       if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
-       if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-       loopTimer = setTimeout(runRecognizerLoop, 400);
-       if (err === "not-allowed" || err === "service-not-allowed") {
-         alert("마이크 권한이 필요합니다. 주소창 오른쪽 마이크 아이콘을 확인하세요.");
-       }
-     };
-   
-     // 🕒 감시 타이머 및 시작
-     try {
-       lastStartTs = Date.now();
-       lastResultTs = lastStartTs;
-   
-       if (watchdogTimer) { clearTimeout(watchdogTimer); }
-       watchdogTimer = setTimeout(() => {
-         if (!state.listening) return;
-         if (lastResultTs === lastStartTs) {
-           try { state.recog && state.recog.abort?.(); } catch (_) {}
-           runRecognizerLoop();
-         }
-       }, 8500);
-   
-       if (noResultTimer) { clearTimeout(noResultTimer); }
-       noResultTimer = setTimeout(() => {
-         if (!state.listening) return;
-         try { state.recog && state.recog.abort?.(); } catch (_) {}
-         runRecognizerLoop();
-       }, 7000);
-   
-       recog.start();
-     } catch (e) {
-       console.warn("recog.start 실패:", e);
-       if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
-       if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer = null; }
-       loopTimer = setTimeout(runRecognizerLoop, 150);
-     }
-   }
+    const sim = similarityToTarget(v, candidateFullText);
+    const targetLenJamo = (state.targetJ || normalizeToJamo(v, false)).length;
+    const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
+    schedulePaint(paintTo);
 
-
+    if(isFinal && sim >= 0.90){
+      if(!state._advancing){
+        state._advancing = true;
+        setTimeout(async () => {
+          await completeVerse(true);
+          state._advancing = false;
+        }, 120);
+      }
+    }
+  }
+  function _createRecognizer(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR) return null;
+    const r = new SR();
+    r.continuous     = true;
+    r.interimResults = true;
+    r.lang = 'ko-KR';
+    try { r.maxAlternatives = 4; } catch(_){}
+    return r;
+  }
   async function startListening(showAlert=true){
-    if (state.listening) return;
+    if (state._sr.listening) return;
     if (!supportsSR()){
-      els.listenHint && (els.listenHint.innerHTML="⚠️ 음성인식 미지원(Chrome/Safari 권장)");
+      els.listenHint && (els.listenHint.innerHTML="⚠️ 음성인식 미지원(Chrome/Samsung Internet 권장) — HTTPS에서 사용하세요.");
       if (showAlert) alert("이 브라우저는 음성인식을 지원하지 않습니다.");
       return;
     }
-    // 마이크 레벨만 켜도 인식 시작 전에 권한 팝업이 뜹니다
     await startMicLevel();
 
-    state.paintedPrefix = 0;
-    state.heardJ = "";
-    state.heardRaw = "";              // ⬅️ 추가
-    state.ignoreUntilTs = 0;
-    state._advancing = false;
-    if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
-    state.listening = true;
+    state._sr.userStopped = false;
+    state._sr.listening   = true;
+    state.heardRaw        = "";
+    state.heardText       = "";
+    state._sr.historyTokens = [];
+    state._sr.historyBase   = [];
+    state.paintedPrefix   = 0;
+    state.ignoreUntilTs   = 0;
+    state._advancing      = false;
+    if (state.paintTimer){ clearTimeout(state.paintTimer); state.paintTimer=null; }
+    if (els.heardBox) els.heardBox.textContent = "";
     els.btnToggleMic && (els.btnToggleMic.textContent="⏹️");
-
     refreshRecogModeLock();
-    runRecognizerLoop();
 
-    ensureHeardBox();
-    if (els.heardBox) els.heardBox.textContent = "";  // ⬅️ 표시 초기화
-  }
-
-  function stopListening(resetBtn=true){
-    state.listening=false;
-    if (loopTimer) { clearTimeout(loopTimer); loopTimer=null; }
-    if (state.recog){
-      try{ state.recog.onresult=null; state.recog.onend=null; state.recog.onerror=null; state.recog.abort?.(); }catch(_){}
-      try{ state.recog.stop?.(); }catch(_){}
+    state._sr.rec = _createRecognizer();
+    if(!state._sr.rec){
+      alert("음성인식 초기화 실패");
+      stopListening();
+      return;
     }
-    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer=null; }
-    if (noResultTimer) { clearTimeout(noResultTimer); noResultTimer=null; }
-    if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
 
-    if (resetBtn && els.btnToggleMic) els.btnToggleMic.textContent="🎙️";
-    stopMicLevel();
-    refreshRecogModeLock();
+    state._sr.rec.onresult = (e) => {
+      let interim = '';
+      let fin = '';
+      for (let i = e.resultIndex; i < e.results.length; i++){
+        const r = e.results[i];
+        if(r.isFinal) fin += r[0].transcript;
+        else interim += r[0].transcript;
+      }
 
-    state.heardRaw = "";              // ⬅️ 추가
-    if (els.heardBox) els.heardBox.textContent = "";  // ⬅️ 표시 초기화
+      if(fin){
+        _appendFinalDedup(fin);
+        const finalNow = _finalText();
+        state.heardRaw = finalNow;
+        _renderInterim('');
+        _applyMatchingAndMaybeAdvance(true, finalNow);
+      }
+
+      if(interim){
+        const candidate = (_finalText() + ' ' + interim).trim();
+        _renderInterim(interim);
+        _applyMatchingAndMaybeAdvance(false, candidate);
+      }
+    };
+
+    state._sr.rec.onerror = (e) => {
+      const err = e?.error || '';
+      if (err === 'not-allowed' || err === 'service-not-allowed'){
+        els.listenHint && (els.listenHint.textContent = "마이크 권한이 거부되었습니다. 주소창의 마이크 아이콘을 확인하세요.");
+      } else if (err === 'network'){
+        els.listenHint && (els.listenHint.textContent = "네트워크 오류로 인식이 중단되었습니다.");
+      } else {
+        els.listenHint && (els.listenHint.textContent = `인식 오류: ${err}`);
+      }
+    };
+
+    state._sr.rec.onend = () => {
+      if(!state._sr.userStopped){
+        try { state._sr.rec && state._sr.rec.start(); } catch(_){}
+      }
+    };
+
+    try { state._sr.rec.start(); } catch(e){
+      console.warn("rec.start 실패:", e);
+      stopListening(false);
+      return;
+    }
   }
+  function stopListening(resetBtn=true){
+    state._sr.userStopped = true;
+    state._sr.listening   = false;
 
-  els.btnToggleMic?.addEventListener("click", ()=>{ if(!state.listening) startListening(); else stopListening(); });
+    if(state._sr.rec){
+      try{
+        state._sr.rec.onresult=null;
+        state._sr.rec.onerror=null;
+        state._sr.rec.onend=null;
+        state._sr.rec.abort?.();
+        state._sr.rec.stop?.();
+      }catch(_){}
+      state._sr.rec = null;
+    }
+
+    stopMicLevel();
+    if (resetBtn && els.btnToggleMic) els.btnToggleMic.textContent="🎙️";
+    refreshRecogModeLock();
+  }
+  els.btnToggleMic?.addEventListener("click", ()=>{ 
+    if(!state._sr.listening) startListening(); 
+    else stopListening(); 
+  });
 
   // ---------- 완료/자동이동 ----------
   async function advanceToNextVerse() {
@@ -1012,11 +1007,11 @@ recog.onresult = (evt) => {
   function refreshRecogModeLock() {
     const radios = document.querySelectorAll('input[name=recogMode]');
     if (!radios?.length) return;
-    radios.forEach(r => { r.disabled = state.listening; });
+    radios.forEach(r => { r.disabled = state._sr?.listening; });
   }
   document.querySelectorAll('input[name=recogMode]')?.forEach(radio=>{
     radio.addEventListener('change', (e)=>{
-      if (state.listening) {
+      if (state._sr?.listening) {
         e.preventDefault();
         e.stopImmediatePropagation();
         alert("마이크를 끈 후에 음성 인식 모드를 변경할 수 있습니다.");
