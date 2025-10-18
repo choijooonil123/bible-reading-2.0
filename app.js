@@ -906,7 +906,7 @@
       return sign + intToHangul(tok);
     }
     // 어디에 붙어있든(예: '3절', '창6:15', '2025년') 모든 숫자를 잡아 한글로 변환
-    const NUM_RE = /[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
+    const NUM_RE = /(?<![\p{L}\p{N}])[+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?/gu;
 
     window.__numbersToHangul = function(str){
       if (!str) return str;
