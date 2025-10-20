@@ -729,6 +729,12 @@ function _appendFinalDedup(newText){
   const B = _baseTokens(T);
   if(T.length === 0) return;
 
+    // 새 절 직후 첫 final 결과가 들어오면 안전 초기화
+  if (els.heardBox && els.heardBox.textContent === "") {
+    state._sr.historyTokens = [];
+    state._sr.historyBase   = [];
+  }
+
   // ✅ 절이 바뀌면 updateVerseText()가 heardBox를 비워둠.
   //    비어있는 상태에서 들어오는 "첫 최종 결과"라면, 이전 히스토리 자동 초기화
   if (els.heardBox && els.heardBox.textContent === "") {
@@ -765,14 +771,31 @@ function _appendFinalDedup(newText){
   function _finalText(){
     return _punctuate(state._sr.historyTokens.join(' '));
   }
-  function _renderInterim(interim){
-    if(!els.heardBox) return;
-    if(interim){
-      els.heardBox.textContent = _finalText() + ' ' + interim;
-    }else{
-      els.heardBox.textContent = _finalText();
+function _renderInterim(interim){
+  if(!els.heardBox) return;
+
+  // 새 절로 바뀐 직후(updateVerseText가 heardBox를 비워둠)
+  // 첫 렌더에서는 과거 히스토리를 버리고, 이전 문장을 붙이지 않음
+  if (els.heardBox.textContent === "") {
+    if (state._sr) {
+      state._sr.historyTokens = [];
+      state._sr.historyBase   = [];
+    }
+    // 첫 interim이면 interim만 표시
+    if (interim) {
+      els.heardBox.textContent = interim;
+      return;
     }
   }
+
+  // 평소 로직
+  if(interim){
+    els.heardBox.textContent = _finalText() + ' ' + interim;
+  }else{
+    els.heardBox.textContent = _finalText();
+  }
+}
+
   function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
     const v = state.verses[state.currentVerseIdx] || "";
     if(!v) return;
