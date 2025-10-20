@@ -724,34 +724,41 @@
     }
     return out.join(' ');
   }
-  function _appendFinalDedup(newText){
-    const T = _tokenize(newText);
-    const B = _baseTokens(T);
-    if(T.length === 0) return;
+function _appendFinalDedup(newText){
+  const T = _tokenize(newText);
+  const B = _baseTokens(T);
+  if(T.length === 0) return;
 
-    if(state._sr.historyTokens.length){
-      const tailLen = Math.min(state._sr.historyBase.length, 80, B.length);
-      let k = 0;
-      for(let len = tailLen; len > 0; len--){
-        const suffix = state._sr.historyBase.slice(-len).join(' ');
-        const prefix = B.slice(0, len).join(' ');
-        if(suffix === prefix){ k = len; break; }
-      }
-      const remainderT = T.slice(k);
-      const remainderB = B.slice(k);
-      if(remainderT.length === 0) return;
-      state._sr.historyTokens = state._sr.historyTokens.concat(remainderT);
-      state._sr.historyBase   = state._sr.historyBase.concat(remainderB);
-    }else{
-      state._sr.historyTokens = T.slice();
-      state._sr.historyBase   = B.slice();
-    }
-
-    const rebuilt = state._sr.historyTokens.join(' ');
-    const compact = _collapseConsecutiveSentences(rebuilt);
-    state._sr.historyTokens = _tokenize(compact);
-    state._sr.historyBase   = _baseTokens(state._sr.historyTokens);
+  // ✅ 절이 바뀌면 updateVerseText()가 heardBox를 비워둠.
+  //    비어있는 상태에서 들어오는 "첫 최종 결과"라면, 이전 히스토리 자동 초기화
+  if (els.heardBox && els.heardBox.textContent === "") {
+    state._sr.historyTokens = [];
+    state._sr.historyBase   = [];
   }
+
+  if(state._sr.historyTokens.length){
+    const tailLen = Math.min(state._sr.historyBase.length, 80, B.length);
+    let k = 0;
+    for(let len = tailLen; len > 0; len--){
+      const suffix = state._sr.historyBase.slice(-len).join(' ');
+      const prefix = B.slice(0, len).join(' ');
+      if(suffix === prefix){ k = len; break; }
+    }
+    const remainderT = T.slice(k);
+    const remainderB = B.slice(k);
+    if(remainderT.length === 0) return;
+    state._sr.historyTokens = state._sr.historyTokens.concat(remainderT);
+    state._sr.historyBase   = state._sr.historyBase.concat(remainderB);
+  }else{
+    state._sr.historyTokens = T.slice();
+    state._sr.historyBase   = B.slice();
+  }
+
+  const rebuilt = state._sr.historyTokens.join(' ');
+  const compact = _collapseConsecutiveSentences(rebuilt);
+  state._sr.historyTokens = _tokenize(compact);
+  state._sr.historyBase   = _baseTokens(state._sr.historyTokens);
+}
 
   ensureHeardBox();
 
