@@ -844,13 +844,15 @@ function _renderInterim(interim){
     }
   }
 
-  if(interim){
-    const head = _finalText();               // 이미 변환 반영
-    const tail = toHangulDigitsAll(interim); // interim도 변환
-    els.heardBox.textContent = (head + ' ' + tail).trim();
-  }else{
-    els.heardBox.textContent = _finalText(); // 변환본
-  }
+   if (interim) {
+     // ✅ 숫자(0~9)가 들어오면 한글로 바꿔줌
+     interim = interim.replace(/\d/g, d => "영일이삼사오육칠팔구"[d]);
+   
+     const candidate = (_finalText() + ' ' + interim).trim();
+     _renderInterim(interim);
+     _applyMatchingAndMaybeAdvance(false, candidate);
+   }
+
 }
 
 
@@ -929,13 +931,17 @@ function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
         else interim += r[0].transcript;
       }
 
-      if(fin){
+      if (fin) {
+        // ✅ 숫자(0~9)가 들어오면 한글로 바꿔줌
+        fin = fin.replace(/\d/g, d => "영일이삼사오육칠팔구"[d]);
+      
         _appendFinalDedup(fin);
         const finalNow = _finalText();
         state.heardRaw = finalNow;
         _renderInterim('');
         _applyMatchingAndMaybeAdvance(true, finalNow);
       }
+
 
       if(interim){
         const candidate = (_finalText() + ' ' + interim).trim();
