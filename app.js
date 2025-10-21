@@ -700,6 +700,60 @@
   };
 
   // ===== 공통 유틸 (상단 샘플과 동일) =====
+  // === [ADD] 숫자 → 한글 수사 변환 유틸 (조/억/만 단위, 소수, 음수, 구분자 유지) ===
+function toHangulDigitsAll(input) {
+  if (!input) return input;
+  return input.replace(/-?\d+(?:[.,:/-]\d+)*?/g, (token) => convertToken(token));
+}
+function convertToken(token) {
+  const parts = token.split(/([.:/,\-])/);
+  return parts.map(p => {
+    if (/^-?\d+$/.test(p)) return intToHangul(p);
+    if (/^\d+\.\d+$/.test(p)) return decimalToHangul(p);
+    return p === '.' ? '점' : p;
+  }).join('');
+}
+const _N = ['영','일','이','삼','사','오','육','칠','팔','구'];
+const _U_SMALL = ['', '십', '백', '천'];
+const _U_BIG   = ['', '만', '억', '조', '경'];
+function intToHangul(numStr){
+  let neg = false;
+  if (numStr.startsWith('-')) { neg = true; numStr = numStr.slice(1); }
+  if (numStr === '0') return '영';
+  numStr = numStr.replace(/^0+/, '');
+  const chunks = [];
+  for (let i = numStr.length; i > 0; i -= 4) {
+    chunks.unshift(numStr.substring(Math.max(0, i-4), i));
+  }
+  let out = [];
+  chunks.forEach((chunk, idxFromLeft) => {
+    const w = fourToHangul(chunk);
+    if (w) {
+      const bigUnit = _U_BIG[chunks.length - idxFromLeft - 1] || '';
+      out.push(w + bigUnit);
+    }
+  });
+  return (neg ? '마이너스 ' : '') + out.join('');
+}
+function fourToHangul(chunk){
+  chunk = chunk.padStart(4, '0');
+  let res = '';
+  for (let i = 0; i < 4; i++){
+    const d = +chunk[i];
+    if (d === 0) continue;
+    const unit = _U_SMALL[4 - i - 1];
+    const digit = (d === 1 && unit) ? '' : _N[d];
+    res += digit + unit;
+  }
+  return res || '';
+}
+function decimalToHangul(s){
+  const [a,b] = s.split('.');
+  const left = intToHangul(a);
+  const right = b.split('').map(d => _N[+d]).join(' ');
+  return `${left}점 ${right}`;
+}
+
   const _normalizeSpaces = s => s.replace(/\s+/g,' ').trim();
   const _stripPuncTail   = w => w.replace(/[\.,!?;:·…~]+$/u,'');
   const _tokenize        = s => _normalizeSpaces(s).split(' ').filter(Boolean);
@@ -768,54 +822,64 @@ function _appendFinalDedup(newText){
 
   ensureHeardBox();
 
-  function _finalText(){
-    return _punctuate(state._sr.historyTokens.join(' '));
-  }
+// [PATCH] 숫자 → 한글 수사 변환 후 구두점 보정하여 반환
+function _finalText(){
+  const s = state._sr.historyTokens.join(' ');
+  return _punctuate(toHangulDigitsAll(s));
+}
+
+// [PATCH] interim/최종 표시 모두 숫자 금지(한글 수사로 변환)
 function _renderInterim(interim){
   if(!els.heardBox) return;
 
-  // 새 절로 바뀐 직후(updateVerseText가 heardBox를 비워둠)
-  // 첫 렌더에서는 과거 히스토리를 버리고, 이전 문장을 붙이지 않음
+  // 새 절 직후: 히스토리 초기화
   if (els.heardBox.textContent === "") {
     if (state._sr) {
       state._sr.historyTokens = [];
       state._sr.historyBase   = [];
     }
-    // 첫 interim이면 interim만 표시
     if (interim) {
-      els.heardBox.textContent = interim;
+      els.heardBox.textContent = toHangulDigitsAll(interim);
       return;
     }
   }
 
-  // 평소 로직
   if(interim){
-    els.heardBox.textContent = _finalText() + ' ' + interim;
+    const head = _finalText();               // 이미 변환 반영
+    const tail = toHangulDigitsAll(interim); // interim도 변환
+    els.heardBox.textContent = (head + ' ' + tail).trim();
   }else{
-    els.heardBox.textContent = _finalText();
+    els.heardBox.textContent = _finalText(); // 변환본
   }
 }
 
-  function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
-    const v = state.verses[state.currentVerseIdx] || "";
-    if(!v) return;
-    if(Date.now() < state.ignoreUntilTs) return;
 
-    const sim = similarityToTarget(v, candidateFullText);
-    const targetLenJamo = (state.targetJ || normalizeToJamo(v, false)).length;
-    const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
-    schedulePaint(paintTo);
+function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
+  let v = state.verses[state.currentVerseIdx] || "";
+  if(!v) return;
+  if(Date.now() < state.ignoreUntilTs) return;
 
-    if(isFinal && sim >= 0.90){
-      if(!state._advancing){
-        state._advancing = true;
-        setTimeout(async () => {
-          await completeVerse(true);
-          state._advancing = false;
-        }, 120);
-      }
+  // [NEW] 숫자를 양쪽 모두 한글 수사로 통일 (본문 vs 인식 후보)
+  const vSafe    = toHangulDigitsAll(v);
+  const candSafe = toHangulDigitsAll(candidateFullText);
+
+  const sim = similarityToTarget(vSafe, candSafe);
+  const targetLenJamo = (state.targetJ || normalizeToJamo(vSafe, false)).length;
+
+  const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
+  schedulePaint(paintTo);
+
+  if(isFinal && sim >= 0.90){
+    if(!state._advancing){
+      state._advancing = true;
+      setTimeout(async () => {
+        await completeVerse(true);
+        state._advancing = false;
+      }, 120);
     }
   }
+}
+
   function _createRecognizer(){
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if(!SR) return null;
