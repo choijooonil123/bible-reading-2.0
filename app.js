@@ -558,6 +558,8 @@
     state.heardJ = "";
     state.heardRaw = "";
     if (els.heardBox) els.heardBox.textContent = "";
+    // ✅ 다음 절 진입 시 STT 히스토리도 리셋(중복제거/후보 빌드가 이전 절에 영향 X)
+    if (state._sr) { state._sr.historyTokens = []; state._sr.historyBase = []; }
     state.heardText = "";
     if (els.heardTextLine) els.heardTextLine.textContent = "";
     state.ignoreUntilTs = 0;
@@ -1008,9 +1010,12 @@
       state.paintedPrefix = 0;
       state.heardJ = "";
       state.ignoreUntilTs = Date.now() + 500;
-    } else {
-      state.ignoreUntilTs = Date.now() + 300;
-    }
+      } else {
+         // ✅ 자동이동 off인 경우에도 미리 깔끔히 비움(시각적 잔상 방지)
+         if (els.heardBox) els.heardBox.textContent = "";
+         if (state._sr) { state._sr.historyTokens = []; state._sr.historyBase = []; }
+         state.ignoreUntilTs = Date.now() + 300;
+      }
   }
 
   // ---------- 앞/뒤 절 버튼 ----------
