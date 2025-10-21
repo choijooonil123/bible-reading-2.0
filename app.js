@@ -1051,7 +1051,7 @@
       updateVerseText();
       buildVerseGrid();
       state.paintedPrefix = 0;
-      state.heardJ = ""
+      state.heardJ = "";
       state.ignoreUntilTs = Date.now() + 500;
       return;
     }
