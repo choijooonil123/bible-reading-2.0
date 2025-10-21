@@ -71,10 +71,10 @@
     micBar: document.getElementById("micBar"),
     micDb: document.getElementById("micDb"),
     verseContainer: document.getElementById("verseContainer"),
-    heardBox: document.getElementById("heardBox"),            // ⬅️ 추가
+    heardBox: document.getElementById("heardBox"),
   };
    
-  // 인식문장 박스가 없으면 동적 생성 + 어두운 스타일
+  // 인식문장 박스가 없으면 동적 생성
   function ensureHeardBox() {
     if (!els.heardBox) {
       const box = document.createElement("div");
@@ -687,314 +687,286 @@
     if (els.micDb) els.micDb.textContent = "-∞ dB";
   }
 
-  // ---------- SpeechRecognition (v2: 강력 중복제거 + 간단 구두점 보정) ----------
-  function supportsSR(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+  // ---------- STT (Android Web, 강력 중복제거 + 간단 구두점 보정, 앱 통합판) ----------
+  (() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const btnMic = els.btnToggleMic;
+    const hintEl = els.listenHint;
 
-  // 전역(상태) 확장: 최종 누적 토큰/베이스 토큰
-  state._sr = {
-    rec: null,
-    listening: false,
-    userStopped: false,
-    historyTokens: [],   // 최종(확정)으로 누적된 "원본 토큰"
-    historyBase: []      // 비교용(말끝 구두점 제거, 소문자)
-  };
+    // STT 상태(앱 구조 유지)
+    state._sr = {
+      rec: null,
+      listening: false,
+      userStopped: false,
+      historyTokens: [],
+      historyBase: []
+    };
 
-  // ===== 공통 유틸 (상단 샘플과 동일) =====
-  // === [ADD] 숫자 → 한글 수사 변환 유틸 (조/억/만 단위, 소수, 음수, 구분자 유지) ===
-function toHangulDigitsAll(input) {
-  if (!input) return input;
-  return input.replace(/-?\d+(?:[.,:/-]\d+)*?/g, (token) => convertToken(token));
-}
-function convertToken(token) {
-  const parts = token.split(/([.:/,\-])/);
-  return parts.map(p => {
-    if (/^-?\d+$/.test(p)) return intToHangul(p);
-    if (/^\d+\.\d+$/.test(p)) return decimalToHangul(p);
-    return p === '.' ? '점' : p;
-  }).join('');
-}
-const _N = ['영','일','이','삼','사','오','육','칠','팔','구'];
-const _U_SMALL = ['', '십', '백', '천'];
-const _U_BIG   = ['', '만', '억', '조', '경'];
-function intToHangul(numStr){
-  let neg = false;
-  if (numStr.startsWith('-')) { neg = true; numStr = numStr.slice(1); }
-  if (numStr === '0') return '영';
-  numStr = numStr.replace(/^0+/, '');
-  const chunks = [];
-  for (let i = numStr.length; i > 0; i -= 4) {
-    chunks.unshift(numStr.substring(Math.max(0, i-4), i));
-  }
-  let out = [];
-  chunks.forEach((chunk, idxFromLeft) => {
-    const w = fourToHangul(chunk);
-    if (w) {
-      const bigUnit = _U_BIG[chunks.length - idxFromLeft - 1] || '';
-      out.push(w + bigUnit);
+    // 숫자 → 한글 수사 변환 (본문/인식 텍스트 통일)
+    function toHangulDigitsAll(input) {
+      if (!input) return input;
+      return input.replace(/-?\d+(?:[.,:/-]\d+)*?/g, (token) => convertToken(token));
     }
-  });
-  return (neg ? '마이너스 ' : '') + out.join('');
-}
-function fourToHangul(chunk){
-  chunk = chunk.padStart(4, '0');
-  let res = '';
-  for (let i = 0; i < 4; i++){
-    const d = +chunk[i];
-    if (d === 0) continue;
-    const unit = _U_SMALL[4 - i - 1];
-    const digit = (d === 1 && unit) ? '' : _N[d];
-    res += digit + unit;
-  }
-  return res || '';
-}
-function decimalToHangul(s){
-  const [a,b] = s.split('.');
-  const left = intToHangul(a);
-  const right = b.split('').map(d => _N[+d]).join(' ');
-  return `${left}점 ${right}`;
-}
-
-  const _normalizeSpaces = s => s.replace(/\s+/g,' ').trim();
-  const _stripPuncTail   = w => w.replace(/[\.,!?;:·…~]+$/u,'');
-  const _tokenize        = s => _normalizeSpaces(s).split(' ').filter(Boolean);
-  const _baseTokens      = tokens => tokens.map(t => _stripPuncTail(t.toLowerCase()));
-  function _punctuate(str){
-    let s = _normalizeSpaces(str);
-    s = s.replace(/([가-힣a-zA-Z0-9\)])\s*(?:\n|$)/g, '$1.\n');
-    s = s.replace(/\.\.+/g,'.');
-    s = s.replace(/(^|[\.!?]\s+)([a-z])/g, (m,p1,p2)=> p1 + p2.toUpperCase());
-    return s;
-  }
-  function _collapseConsecutiveSentences(text){
-    const parts = _normalizeSpaces(text).split(/(?<=[\.!?\u2026\u3002])\s+/);
-    const out = [];
-    for(const p of parts){
-      const t = (p||'').trim(); if(!t) continue;
-      const last = out[out.length-1] || '';
-      if(last === t) continue;
-      if(last && (t.startsWith(last) || last.startsWith(t))){
-        out[out.length-1] = (t.length >= last.length) ? t : last;
-      }else out.push(t);
+    function convertToken(token) {
+      const parts = token.split(/([.:/,\-])/);
+      return parts.map(p => {
+        if (/^-?\d+$/.test(p)) return intToHangul(p);
+        if (/^\d+\.\d+$/.test(p)) return decimalToHangul(p);
+        return p === '.' ? '점' : p;
+      }).join('');
     }
-    return out.join(' ');
-  }
-function _appendFinalDedup(newText){
-  const T = _tokenize(newText);
-  const B = _baseTokens(T);
-  if(T.length === 0) return;
-
-    // 새 절 직후 첫 final 결과가 들어오면 안전 초기화
-  if (els.heardBox && els.heardBox.textContent === "") {
-    state._sr.historyTokens = [];
-    state._sr.historyBase   = [];
-  }
-
-  // ✅ 절이 바뀌면 updateVerseText()가 heardBox를 비워둠.
-  //    비어있는 상태에서 들어오는 "첫 최종 결과"라면, 이전 히스토리 자동 초기화
-  if (els.heardBox && els.heardBox.textContent === "") {
-    state._sr.historyTokens = [];
-    state._sr.historyBase   = [];
-  }
-
-  if(state._sr.historyTokens.length){
-    const tailLen = Math.min(state._sr.historyBase.length, 80, B.length);
-    let k = 0;
-    for(let len = tailLen; len > 0; len--){
-      const suffix = state._sr.historyBase.slice(-len).join(' ');
-      const prefix = B.slice(0, len).join(' ');
-      if(suffix === prefix){ k = len; break; }
+    const _N = ['영','일','이','삼','사','오','육','칠','팔','구'];
+    const _U_SMALL = ['', '십', '백', '천'];
+    const _U_BIG   = ['', '만', '억', '조', '경'];
+    function intToHangul(numStr){
+      let neg = false;
+      if (numStr.startsWith('-')) { neg = true; numStr = numStr.slice(1); }
+      if (numStr === '0') return '영';
+      numStr = numStr.replace(/^0+/, '');
+      const chunks = [];
+      for (let i = numStr.length; i > 0; i -= 4) {
+        chunks.unshift(numStr.substring(Math.max(0, i-4), i));
+      }
+      let out = [];
+      chunks.forEach((chunk, idxFromLeft) => {
+        const w = fourToHangul(chunk);
+        if (w) {
+          const bigUnit = _U_BIG[chunks.length - idxFromLeft - 1] || '';
+          out.push(w + bigUnit);
+        }
+      });
+      return (neg ? '마이너스 ' : '') + out.join('');
     }
-    const remainderT = T.slice(k);
-    const remainderB = B.slice(k);
-    if(remainderT.length === 0) return;
-    state._sr.historyTokens = state._sr.historyTokens.concat(remainderT);
-    state._sr.historyBase   = state._sr.historyBase.concat(remainderB);
-  }else{
-    state._sr.historyTokens = T.slice();
-    state._sr.historyBase   = B.slice();
-  }
+    function fourToHangul(chunk){
+      chunk = chunk.padStart(4, '0');
+      let res = '';
+      for (let i = 0; i < 4; i++){
+        const d = +chunk[i];
+        if (d === 0) continue;
+        const unit = _U_SMALL[4 - i - 1];
+        const digit = (d === 1 && unit) ? '' : _N[d];
+        res += digit + unit;
+      }
+      return res || '';
+    }
+    function decimalToHangul(s){
+      const [a,b] = s.split('.');
+      const left = intToHangul(a);
+      const right = b.split('').map(d => _N[+d]).join(' ');
+      return `${left}점 ${right}`;
+    }
 
-  const rebuilt = state._sr.historyTokens.join(' ');
-  const compact = _collapseConsecutiveSentences(rebuilt);
-  state._sr.historyTokens = _tokenize(compact);
-  state._sr.historyBase   = _baseTokens(state._sr.historyTokens);
-}
+    // 구두점 보정/토크나이즈
+    const normalizeSpaces = (s)=> s.replace(/\s+/g,' ').trim();
+    const stripPuncTail   = (w)=> w.replace(/[\.,!?;:·…~]+$/u,'');
+    const tokenize        = (s)=> normalizeSpaces(s).split(' ').filter(Boolean);
+    const baseTokens      = (tokens)=> tokens.map(t=> stripPuncTail(t.toLowerCase()));
+    function punctuate(str){
+      let s = normalizeSpaces(str);
+      s = s.replace(/([가-힣a-zA-Z0-9\)])\s*(?:\n|$)/g, '$1.\n');
+      s = s.replace(/\.\.+/g,'.');
+      s = s.replace(/(^|[\.!?]\s+)([a-z])/g, (m,p1,p2)=> p1 + p2.toUpperCase());
+      return s;
+    }
+    function collapseConsecutiveSentences(text){
+      const parts = normalizeSpaces(text).split(/(?<=[\.!?\u2026\u3002])\s+/);
+      const out = [];
+      for(const p of parts){
+        const t = (p||'').trim(); if(!t) continue;
+        const last = out[out.length-1] || '';
+        if(last === t) continue;
+        if(last && (t.startsWith(last) || last.startsWith(t))){
+          out[out.length-1] = (t.length >= last.length) ? t : last;
+        } else out.push(t);
+      }
+      return out.join(' ');
+    }
 
-  ensureHeardBox();
+    // 최종 누적 + 중복제거 → 화면반영 → 매칭(최종)
+    function appendFinalDedup(newText){
+      const newT = tokenize(newText);
+      const newB = baseTokens(newT);
+      if(newT.length === 0) return;
 
-// [PATCH] 숫자 → 한글 수사 변환 후 구두점 보정하여 반환
-function _finalText(){
-  const s = state._sr.historyTokens.join(' ');
-  return _punctuate(toHangulDigitsAll(s));
-}
+      if(state._sr.historyTokens.length){
+        const tailLen = Math.min(state._sr.historyBase.length, 80, newB.length);
+        let k = 0;
+        for(let len = tailLen; len > 0; len--){
+          const suffix = state._sr.historyBase.slice(-len).join(' ');
+          const prefix = newB.slice(0, len).join(' ');
+          if(suffix === prefix){ k = len; break; }
+        }
+        const remainderT = newT.slice(k);
+        const remainderB = newB.slice(k);
+        if(remainderT.length === 0) return;
+        state._sr.historyTokens = state._sr.historyTokens.concat(remainderT);
+        state._sr.historyBase   = state._sr.historyBase.concat(remainderB);
+      } else {
+        state._sr.historyTokens = newT.slice();
+        state._sr.historyBase   = newB.slice();
+      }
 
-// [PATCH] interim/최종 표시 모두 숫자 금지(한글 수사로 변환)
-function _renderInterim(interim){
-  if(!els.heardBox) return;
+      const rebuilt = state._sr.historyTokens.join(' ');
+      const compact = collapseConsecutiveSentences(rebuilt);
+      state._sr.historyTokens = tokenize(compact);
+      state._sr.historyBase   = baseTokens(state._sr.historyTokens);
 
-  // 새 절 직후: 히스토리 초기화
-  if (els.heardBox.textContent === "") {
-    if (state._sr) {
+      const finalText = punctuate(toHangulDigitsAll(state._sr.historyTokens.join(' ')));
+      if (els.heardBox) els.heardBox.textContent = finalText;
+
+      _applyMatchingAndMaybeAdvance(true, finalText);
+    }
+
+    // 중간 후보 → 화면반영 → 매칭(중간)
+    function applyInterimCandidate(interimRaw){
+      if (!interimRaw) return;
+      const candidate = toHangulDigitsAll(
+        (state._sr.historyTokens.join(' ') + ' ' + interimRaw).trim()
+      );
+      if (els.heardBox) els.heardBox.textContent = punctuate(candidate);
+      _applyMatchingAndMaybeAdvance(false, candidate);
+    }
+
+    // 매칭/페인트/자동이동 (새 STT에서 사용)
+    function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
+      let v = state.verses[state.currentVerseIdx] || "";
+      if(!v) return;
+      if(Date.now() < state.ignoreUntilTs) return;
+
+      const vSafe    = toHangulDigitsAll(v);
+      const candSafe = toHangulDigitsAll(candidateFullText);
+
+      const sim = similarityToTarget(vSafe, candSafe);
+      const targetLenJamo = (state.targetJ || normalizeToJamo(vSafe, false)).length;
+
+      const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
+      schedulePaint(paintTo);
+
+      if(isFinal && sim >= 0.90){
+        if(!state._advancing){
+          state._advancing = true;
+          setTimeout(async () => {
+            await completeVerse(true);
+            state._advancing = false;
+          }, 120);
+        }
+      }
+    }
+
+    // recognizer 생성/수명주기
+    function createRecognizer(){
+      if(!SR) return null;
+      const r = new SR();
+      r.continuous = true;
+      r.interimResults = true;
+      r.lang = 'ko-KR';
+      try { r.maxAlternatives = 4; } catch(_){}
+      return r;
+    }
+    function supportsSR(){ return !!SR; }
+
+    async function startListening(showAlert=true){
+      if (state._sr.listening) return;
+      if (!supportsSR()){
+        if (hintEl) hintEl.innerHTML="⚠️ 음성인식 미지원(Chrome/Samsung Internet 권장) — HTTPS에서 사용하세요.";
+        if (showAlert) alert("이 브라우저는 음성인식을 지원하지 않습니다.");
+        return;
+      }
+
+      await startMicLevel();
+
+      state._sr.userStopped = false;
+      state._sr.listening   = true;
       state._sr.historyTokens = [];
       state._sr.historyBase   = [];
-    }
-    if (interim) {
-      els.heardBox.textContent = toHangulDigitsAll(interim);
-      return;
-    }
-  }
+      state.paintedPrefix   = 0;
+      state.ignoreUntilTs   = 0;
+      state._advancing      = false;
+      if (state.paintTimer){ clearTimeout(state.paintTimer); state.paintTimer=null; }
+      if (els.heardBox) els.heardBox.textContent = "";
+      if (btnMic) btnMic.textContent="⏹️";
+      refreshRecogModeLock();
 
-   if (interim) {
-     // ✅ 숫자(0~9)가 들어오면 한글로 바꿔줌
-     interim = interim.replace(/\d/g, d => "영일이삼사오육칠팔구"[d]);
-   
-     const candidate = (_finalText() + ' ' + interim).trim();
-     _renderInterim(interim);
-     _applyMatchingAndMaybeAdvance(false, candidate);
-   }
-
-}
-
-
-function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
-  let v = state.verses[state.currentVerseIdx] || "";
-  if(!v) return;
-  if(Date.now() < state.ignoreUntilTs) return;
-
-  // [NEW] 숫자를 양쪽 모두 한글 수사로 통일 (본문 vs 인식 후보)
-  const vSafe    = toHangulDigitsAll(v);
-  const candSafe = toHangulDigitsAll(candidateFullText);
-
-  const sim = similarityToTarget(vSafe, candSafe);
-  const targetLenJamo = (state.targetJ || normalizeToJamo(vSafe, false)).length;
-
-  const paintTo = Math.min(targetLenJamo, Math.floor(sim * targetLenJamo));
-  schedulePaint(paintTo);
-
-  if(isFinal && sim >= 0.90){
-    if(!state._advancing){
-      state._advancing = true;
-      setTimeout(async () => {
-        await completeVerse(true);
-        state._advancing = false;
-      }, 120);
-    }
-  }
-}
-
-  function _createRecognizer(){
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if(!SR) return null;
-    const r = new SR();
-    r.continuous     = true;
-    r.interimResults = true;
-    r.lang = 'ko-KR';
-    try { r.maxAlternatives = 4; } catch(_){}
-    return r;
-  }
-  async function startListening(showAlert=true){
-    if (state._sr.listening) return;
-    if (!supportsSR()){
-      els.listenHint && (els.listenHint.innerHTML="⚠️ 음성인식 미지원(Chrome/Samsung Internet 권장) — HTTPS에서 사용하세요.");
-      if (showAlert) alert("이 브라우저는 음성인식을 지원하지 않습니다.");
-      return;
-    }
-    await startMicLevel();
-
-    state._sr.userStopped = false;
-    state._sr.listening   = true;
-    state.heardRaw        = "";
-    state.heardText       = "";
-    state._sr.historyTokens = [];
-    state._sr.historyBase   = [];
-    state.paintedPrefix   = 0;
-    state.ignoreUntilTs   = 0;
-    state._advancing      = false;
-    if (state.paintTimer){ clearTimeout(state.paintTimer); state.paintTimer=null; }
-    if (els.heardBox) els.heardBox.textContent = "";
-    els.btnToggleMic && (els.btnToggleMic.textContent="⏹️");
-    refreshRecogModeLock();
-
-    state._sr.rec = _createRecognizer();
-    if(!state._sr.rec){
-      alert("음성인식 초기화 실패");
-      stopListening();
-      return;
-    }
-
-   state._sr.rec.onresult = (e) => {
-     let interim = '';
-     let fin = '';
-     for (let i = e.resultIndex; i < e.results.length; i++){
-       const r = e.results[i];
-       if(r.isFinal) fin += r[0].transcript;
-       else interim += r[0].transcript;
-     }
-   
-     if (fin) {
-       fin = fin.replace(/\d/g, d => "영하나둘셋넷다섯여섯일곱여덟아홉"[d]); // ← 추가
-       _appendFinalDedup(fin);
-       const finalNow = _finalText();
-       state.heardRaw = finalNow;
-       _renderInterim('');
-       _applyMatchingAndMaybeAdvance(true, finalNow);
-     }
-   
-     if (interim) {
-       interim = interim.replace(/\d/g, d => "영하나둘셋넷다섯여섯일곱여덟아홉"[d]); // ← 추가
-       const candidate = (_finalText() + ' ' + interim).trim();
-       _renderInterim(interim);
-       _applyMatchingAndMaybeAdvance(false, candidate);
-     }
-   };
-
-
-    state._sr.rec.onerror = (e) => {
-      const err = e?.error || '';
-      if (err === 'not-allowed' || err === 'service-not-allowed'){
-        els.listenHint && (els.listenHint.textContent = "마이크 권한이 거부되었습니다. 주소창의 마이크 아이콘을 확인하세요.");
-      } else if (err === 'network'){
-        els.listenHint && (els.listenHint.textContent = "네트워크 오류로 인식이 중단되었습니다.");
-      } else {
-        els.listenHint && (els.listenHint.textContent = `인식 오류: ${err}`);
+      state._sr.rec = createRecognizer();
+      if(!state._sr.rec){
+        alert("음성인식 초기화 실패");
+        stopListening();
+        return;
       }
-    };
 
-    state._sr.rec.onend = () => {
-      if(!state._sr.userStopped){
-        try { state._sr.rec && state._sr.rec.start(); } catch(_){}
+      state._sr.rec.onresult = (e) => {
+        let interim = '';
+        let fin = '';
+        for (let i = e.resultIndex; i < e.results.length; i++){
+          const r = e.results[i];
+          if(r.isFinal) fin += r[0].transcript;
+          else interim += r[0].transcript;
+        }
+
+        if (interim) {
+          const interimSafe = interim.replace(/\d/g, d => "영일이삼사오육칠팔구"[d]);
+          applyInterimCandidate(interimSafe);
+        }
+
+        if (fin) {
+          const finSafe = fin.replace(/\d/g, d => "영일이삼사오육칠팔구"[d]);
+          appendFinalDedup(finSafe);
+        }
+      };
+
+      state._sr.rec.onerror = (e) => {
+        const err = e?.error || '';
+        if (err === 'not-allowed' || err === 'service-not-allowed'){
+          hintEl && (hintEl.textContent = "마이크 권한이 거부되었습니다. 주소창의 마이크 아이콘을 확인하세요.");
+        } else if (err === 'network'){
+          hintEl && (hintEl.textContent = "네트워크 오류로 인식이 중단되었습니다.");
+        } else {
+          hintEl && (hintEl.textContent = `인식 오류: ${err}`);
+        }
+      };
+
+      state._sr.rec.onend = () => {
+        if(!state._sr.userStopped){
+          try { state._sr.rec && state._sr.rec.start(); } catch(_){}
+        }
+      };
+
+      try { state._sr.rec.start(); } catch(e){
+        console.warn("rec.start 실패:", e);
+        stopListening(false);
+        return;
       }
-    };
-
-    try { state._sr.rec.start(); } catch(e){
-      console.warn("rec.start 실패:", e);
-      stopListening(false);
-      return;
-    }
-  }
-  function stopListening(resetBtn=true){
-    state._sr.userStopped = true;
-    state._sr.listening   = false;
-
-    if(state._sr.rec){
-      try{
-        state._sr.rec.onresult=null;
-        state._sr.rec.onerror=null;
-        state._sr.rec.onend=null;
-        state._sr.rec.abort?.();
-        state._sr.rec.stop?.();
-      }catch(_){}
-      state._sr.rec = null;
     }
 
-    stopMicLevel();
-    if (resetBtn && els.btnToggleMic) els.btnToggleMic.textContent="🎙️";
-    refreshRecogModeLock();
-  }
-  els.btnToggleMic?.addEventListener("click", ()=>{ 
-    if(!state._sr.listening) startListening(); 
-    else stopListening(); 
-  });
+    function stopListening(resetBtn=true){
+      state._sr.userStopped = true;
+      state._sr.listening   = false;
+
+      if(state._sr.rec){
+        try{
+          state._sr.rec.onresult=null;
+          state._sr.rec.onerror=null;
+          state._sr.rec.onend=null;
+          state._sr.rec.abort?.();
+          state._sr.rec.stop?.();
+        }catch(_){}
+        state._sr.rec = null;
+      }
+
+      stopMicLevel();
+      if (resetBtn && btnMic) btnMic.textContent="🎙️";
+      refreshRecogModeLock();
+    }
+
+    // 앱의 마이크 토글 버튼 연결
+    els.btnToggleMic?.addEventListener("click", ()=>{ 
+      if(!state._sr.listening) startListening(); 
+      else stopListening(); 
+    });
+
+    // 필요 시 전역 노출
+    window.__stt = { startListening, stopListening };
+  })();
 
   // ---------- 완료/자동이동 ----------
   async function advanceToNextVerse() {
@@ -1079,7 +1051,7 @@ function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
       updateVerseText();
       buildVerseGrid();
       state.paintedPrefix = 0;
-      state.heardJ = "";
+      state.heardJ = ""
       state.ignoreUntilTs = Date.now() + 500;
       return;
     }
@@ -1190,7 +1162,7 @@ function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
 
     thead.appendChild(trTop);
     thead.appendChild(trMiddle);
-    theadj.appendChild(trBottom);
+    thead.appendChild(trBottom); // (타이포 수정: theadj -> thead)
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
