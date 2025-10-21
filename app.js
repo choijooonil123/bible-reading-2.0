@@ -922,33 +922,32 @@ function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
       return;
     }
 
-    state._sr.rec.onresult = (e) => {
-      let interim = '';
-      let fin = '';
-      for (let i = e.resultIndex; i < e.results.length; i++){
-        const r = e.results[i];
-        if(r.isFinal) fin += r[0].transcript;
-        else interim += r[0].transcript;
-      }
+   state._sr.rec.onresult = (e) => {
+     let interim = '';
+     let fin = '';
+     for (let i = e.resultIndex; i < e.results.length; i++){
+       const r = e.results[i];
+       if(r.isFinal) fin += r[0].transcript;
+       else interim += r[0].transcript;
+     }
+   
+     if (fin) {
+       fin = fin.replace(/\d/g, d => "영하나둘셋넷다섯여섯일곱여덟아홉"[d]); // ← 추가
+       _appendFinalDedup(fin);
+       const finalNow = _finalText();
+       state.heardRaw = finalNow;
+       _renderInterim('');
+       _applyMatchingAndMaybeAdvance(true, finalNow);
+     }
+   
+     if (interim) {
+       interim = interim.replace(/\d/g, d => "영하나둘셋넷다섯여섯일곱여덟아홉"[d]); // ← 추가
+       const candidate = (_finalText() + ' ' + interim).trim();
+       _renderInterim(interim);
+       _applyMatchingAndMaybeAdvance(false, candidate);
+     }
+   };
 
-      if (fin) {
-        // ✅ 숫자(0~9)가 들어오면 한글로 바꿔줌
-        fin = fin.replace(/\d/g, d => "영일이삼사오육칠팔구"[d]);
-      
-        _appendFinalDedup(fin);
-        const finalNow = _finalText();
-        state.heardRaw = finalNow;
-        _renderInterim('');
-        _applyMatchingAndMaybeAdvance(true, finalNow);
-      }
-
-
-      if(interim){
-        const candidate = (_finalText() + ' ' + interim).trim();
-        _renderInterim(interim);
-        _applyMatchingAndMaybeAdvance(false, candidate);
-      }
-    };
 
     state._sr.rec.onerror = (e) => {
       const err = e?.error || '';
