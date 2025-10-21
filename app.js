@@ -1190,7 +1190,7 @@ function _applyMatchingAndMaybeAdvance(isFinal, candidateFullText){
 
     thead.appendChild(trTop);
     thead.appendChild(trMiddle);
-    thead.appendChild(trBottom);
+    theadj.appendChild(trBottom);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
