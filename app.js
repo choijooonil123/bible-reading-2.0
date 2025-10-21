@@ -479,6 +479,28 @@
   }
 
   // ---------- 표시/매칭 ----------
+  // ✅ 새 절로 넘어갈 때, 표시/히스토리/타이밍을 한 번에 초기화
+function resetHeard() {
+  // 화면 표시 텍스트 초기화
+  if (els.heardBox) els.heardBox.textContent = "";
+  if (els.heardTextLine) els.heardTextLine.textContent = "";
+
+  // STT 누적/중간 상태 초기화
+  if (state._sr) {
+    state._sr.historyTokens = [];
+    state._sr.historyBase   = [];
+  }
+  state.heardText = "";
+  state.heardRaw  = "";
+  state.heardJ    = "";
+
+  // 페인트/매칭 타이밍 초기화
+  state.paintedPrefix = 0;
+  state.pendingPaint  = 0;
+  state.ignoreUntilTs = 0;
+  if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer = null; }
+}
+
   function decomposeJamo(s){
     const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
     const JUNG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"];
@@ -552,19 +574,28 @@
     state.charJamoLens = jamoLens;
     return cum;
   }
-  function updateVerseText() {
-    const v = state.verses[state.currentVerseIdx] || "";
-    state.paintedPrefix = 0;
-    state.heardJ = "";
-    state.heardRaw = "";
-    if (els.heardBox) els.heardBox.textContent = "";
-    // ✅ 다음 절 진입 시 STT 히스토리도 리셋(중복제거/후보 빌드가 이전 절에 영향 X)
-    if (state._sr) { state._sr.historyTokens = []; state._sr.historyBase = []; }
-    state.heardText = "";
-    if (els.heardTextLine) els.heardTextLine.textContent = "";
-    state.ignoreUntilTs = 0;
-    state._advancing = false;
-    if (state.paintTimer) { clearTimeout(state.paintTimer); state.paintTimer=null; }
+   function updateVerseText() {
+     const v = state.verses[state.currentVerseIdx] || "";
+   
+     // ✅ 한 줄로 깔끔히 초기화(표시 + STT 히스토리 + 페인트 타이머)
+     resetHeard();
+     state._advancing = false;
+   
+     state.targetJ = normalizeToJamo(v, false);
+     state.charCumJamo = buildCharToJamoCumMap(v);
+   
+     // (이하 기존 표시/라벨/버튼 활성화 로직 그대로 유지)
+     els.locLabel && (els.locLabel.textContent =
+       `${state.currentBookKo} ${state.currentChapter}장 ${state.currentVerseIdx + 1}절`);
+     if (els.verseText) {
+       els.verseText.innerHTML = "";
+       for (let i = 0; i < v.length; i++) {
+         const s = document.createElement("span");
+         s.textContent = v[i];
+         s.style.color = "";
+         els.verseText.appendChild(s);
+       }
+     }
 
     state.targetJ = normalizeToJamo(v, false);
     state.charCumJamo = buildCharToJamoCumMap(v);
@@ -1011,10 +1042,9 @@
       state.heardJ = "";
       state.ignoreUntilTs = Date.now() + 500;
       } else {
-         // ✅ 자동이동 off인 경우에도 미리 깔끔히 비움(시각적 잔상 방지)
-         if (els.heardBox) els.heardBox.textContent = "";
-         if (state._sr) { state._sr.historyTokens = []; state._sr.historyBase = []; }
-         state.ignoreUntilTs = Date.now() + 300;
+        // ✅ 자동이동 OFF 시에도 즉시 표시/히스토리 정리
+        resetHeard();
+        state.ignoreUntilTs = Date.now() + 300;
       }
   }
 
